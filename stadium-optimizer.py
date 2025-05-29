@@ -41,16 +41,17 @@ CHARACTER_BASE_STATS = {
 }
 
 class Item:
-    def __init__(self, name: str, stats: Dict[str, float], cost: float, character: str = None):
+    def __init__(self, name: str, stats: Dict[str, float], cost: float, 
+                 category: str, character: str = None):
         self.name = name
         self.stats = stats
         self.cost = cost
+        self.category = category  # "Weapon", "Ability", or "Survival"
         self.character = character  # None means usable by all characters
 
 def combine_stats(base_stats: Dict[str, float], items: List[Item]) -> Dict[str, float]:
     combined = base_stats.copy()
 
-    # Initialize cooldown reduction as 1 (no reduction)
     cooldown_mult = 1.0
 
     for item in items:
@@ -78,7 +79,6 @@ def calculate_derived_stats(stats: Dict[str, float]) -> Dict[str, float]:
     base_attack_speed = 1
 
     weapon_dps = base_weapon_damage * (1 + stats["Weapon Power"]) * (1 + stats["Attack Speed"]) * base_attack_speed
-    # Cooldown reduction applies only to Ability DPS
     ability_dps = base_ability_damage * (1 + stats["Ability Power"]) / (1 - stats["Cooldown Reduction"])
 
     return {
@@ -89,14 +89,14 @@ def calculate_derived_stats(stats: Dict[str, float]) -> Dict[str, float]:
 
 # Example items (add your own as needed)
 ITEM_POOL = [
-    Item("Item A", {"HP": 50, "Weapon Power": 0.1, "Cooldown Reduction": 0.1}, cost=150),
-    Item("Item B", {"Armor": 30, "Damage Reduction": 0.05, "Attack Speed": 0.05}, cost=120),
-    Item("Item C", {"Shields": 40, "Ability Power": 0.15}, cost=180),
-    Item("Item D", {"Max Ammo": 20, "Reload Speed": 0.1}, cost=90),
-    Item("Item E", {"Melee Damage": 0.2, "Critical Hit Damage": 0.25}, cost=200, character="Juno"),
-    Item("Item F", {"Move Speed": 0.1, "Weapon Lifesteal": 0.05}, cost=110, character="Kiriko"),
-    Item("Item G", {"Ability Lifesteal": 0.07, "Cooldown Reduction": 0.15}, cost=170, character="Mercy"),
-    Item("Item H", {"HP": 70, "Armor": 20}, cost=130, character="Mei"),
+    Item("Item A", {"HP": 50, "Weapon Power": 0.1, "Cooldown Reduction": 0.1}, cost=150, category="Weapon"),
+    Item("Item B", {"Armor": 30, "Damage Reduction": 0.05, "Attack Speed": 0.05}, cost=120, category="Survival"),
+    Item("Item C", {"Shields": 40, "Ability Power": 0.15}, cost=180, category="Ability"),
+    Item("Item D", {"Max Ammo": 20, "Reload Speed": 0.1}, cost=90, category="Survival"),
+    Item("Item E", {"Melee Damage": 0.2, "Critical Hit Damage": 0.25}, cost=200, category="Weapon", character="Juno"),
+    Item("Item F", {"Move Speed": 0.1, "Weapon Lifesteal": 0.05}, cost=110, category="Survival", character="Kiriko"),
+    Item("Item G", {"Ability Lifesteal": 0.07, "Cooldown Reduction": 0.15}, cost=170, category="Ability", character="Mercy"),
+    Item("Item H", {"HP": 70, "Armor": 20}, cost=130, category="Survival", character="Mei"),
 ]
 
 def format_stat(name, value):
@@ -192,7 +192,7 @@ def main():
         st.markdown(f"**Total Cost:** {best_cost}")
         st.markdown("**Items:**")
         for item in best_build:
-            st.markdown(f"- {item.name}")
+            st.markdown(f"- {item.name} _(Category: {item.category})_")
         st.markdown("---")
 
         filtered_stats = get_relevant_stats(optimization_target, best_stats)
