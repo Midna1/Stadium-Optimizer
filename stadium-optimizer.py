@@ -225,7 +225,7 @@ target = st.selectbox("Choose optimization target", list(target_relevant_stats.k
 filtered_items = [item for item in ITEM_POOL if (item.character is None or item.character == character)]
 filtered_items = filter_items_for_target(filtered_items, target)
 
-max_items = st.slider("Maximum number of items to buy", 1, 5, 3)
+max_items = st.slider("Maximum number of items to buy", 1, 6, 6)
 
 st.write(f"Filtering {len(filtered_items)} items for {target} optimization.")
 
