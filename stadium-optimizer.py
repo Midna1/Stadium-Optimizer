@@ -54,8 +54,33 @@ ITEM_POOL = [
     Item("Reinforced Titanium", {"Shields": 25}, cost=3750, category="Survival"),
     Item("Cushioned Padding", {"Shields": 25}, cost=4000, category="Survival"),
     Item("Ironclad Exhaust Ports", {"Cooldown Reduction": 0.05}, cost=4000, category="Survival"),
-    Item("Vishkar Condensor",{"Shields": 25},cost=4000,category="Survival",extra_effect=vishkar_condensor_effect
-),
+    Item("Vishkar Condensor",{"Shields": 25},cost=4000,category="Survival",extra_effect=vishkar_condensor_effect),
+    Item("Vital-E-Tee", {"Armor": 10}, cost=4000, category="Survival"),
+    Item("Crusader Hydraulics", {"Armor": 25, "Damage Reduction": 0.10}, cost=10000, category="Survival"),
+    Item("Iron Eyes", {"Shields": 25}, cost=4500, category="Survival"),
+    Item("Meka Z-Series", {
+        "HP Multiplier": 0.08,
+        "Armor Multiplier": 0.08,
+        "Shields Multiplier": 0.08,
+    }, cost=5000, category="Survival"),
+    Item("Bloodbound", {"HP": 50}, cost=9000, category="Survival"),
+    Item("Geneticist's Vial", {"HP": 25}, cost=9000, category="Survival"),
+    Item("Divine Intervention", {"Shields": 50, "Damage Reduction": 0.15}, cost=95000, category="Survival"),
+    Item("Gloom Gauntlet", {"Armor": 50, "Melee Damage": 0.15}, cost=10000, category="Survival"),
+    Item("Martian Mender", {"HP": 25, "Cooldown Reduction": 0.10}, cost=10000, category="Survival"),
+    Item("Phantasmic Flux", {
+        "Weapon Power": 0.10,
+        "Ability Power": 0.10,
+        "Weapon Lifesteal": 0.15,
+        "Ability Lifesteal": 0.15
+    }, cost=10000, category="Survival"),
+    Item("Rustung Von Wilhelm", {
+        "HP Multiplier": 0.15,
+        "Armor Multiplier": 0.15,
+        "Shields Multiplier": 0.15,
+        "Damage Reduction": 0.03
+    }, cost=10000, category="Survival"),
+
 
 
     # Juno-specific items
@@ -128,35 +153,38 @@ def calculate_build_stats(items, base_stats):
         "Move Speed": 0.0,
         "Melee Damage": 0.0,
         "Critical Hit Damage": 0.0,
-        "Bonus Damage": 0.0,
     }
 
-    # Add item stats
+    # Base sum for flat stats and accumulate multipliers
+    hp_multiplier = 0.0
+    armor_multiplier = 0.0
+    shields_multiplier = 0.0
+
     for item in items:
         for stat, val in item.stats.items():
             if stat == "Cooldown Reduction":
                 stats["Cooldown Reduction"] *= (1 - val)
+            elif stat == "HP Multiplier":
+                hp_multiplier += val
+            elif stat == "Armor Multiplier":
+                armor_multiplier += val
+            elif stat == "Shields Multiplier":
+                shields_multiplier += val
             elif stat in stats:
                 stats[stat] += val
 
-    # Apply extra_effects that return dicts of stat modifications
-    for item in items:
-        if item.extra_effect:
-            effect_result = item.extra_effect(stats)
-            if isinstance(effect_result, dict):
-                for stat, val in effect_result.items():
-                    if stat == "Cooldown Reduction":
-                        stats["Cooldown Reduction"] *= (1 - val)
-                    elif stat in stats:
-                        stats[stat] += val
-
-    # Clamp cooldown reduction minimum
+    # Clamp cooldown reduction min 0.1
     stats["Cooldown Reduction"] = max(stats["Cooldown Reduction"], 0.1)
 
-    # Apply cooldown reduction multiplier to Ability Power
+    # Apply multipliers AFTER flat stats are added
+    stats["HP"] *= (1 + hp_multiplier)
+    stats["Armor"] *= (1 + armor_multiplier)
+    stats["Shields"] *= (1 + shields_multiplier)
+
+    # Apply cooldown reduction to Ability Power
     stats["Ability Power"] *= stats["Cooldown Reduction"]
 
-    # Lock-On Shield extra: 50% of Shields added to HP
+    # Handle Lock-On Shield extra HP: 50% of Shields added to HP
     if any(item.name == "Lock-On Shield" for item in items):
         stats["HP"] += 0.5 * stats["Shields"]
 
