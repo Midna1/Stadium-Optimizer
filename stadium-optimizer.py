@@ -73,7 +73,7 @@ def evaluate_build(items: List[Item]) -> Dict[str, float]:
     combined_stats.update(derived_stats)
     return combined_stats
 
-# Updated example pool with costs
+# Example item pool with costs
 ITEM_POOL = [
     Item("Item A", {"HP": 50, "Weapon Power": 0.1, "Cooldown Reduction": 0.1}, cost=150),
     Item("Item B", {"Armor": 30, "Damage Reduction": 0.05, "Attack Speed": 0.05}, cost=120),
@@ -88,46 +88,35 @@ def main():
     st.title("Game Build Optimizer")
 
     optimization_target = st.selectbox("Select Optimization Target:", OPTIMIZATION_TARGETS)
-
-    selected_names = st.multiselect(
-        "Optionally select items to include in builds (default: all items):",
-        options=[item.name for item in ITEM_POOL],
-        default=[item.name for item in ITEM_POOL]
-    )
-
     budget = st.number_input("Enter your current budget (money):", min_value=0, value=500, step=10)
 
-    if len(selected_names) == 0:
-        selected_items = ITEM_POOL
-    else:
-        selected_items = [item for item in ITEM_POOL if item.name in selected_names]
+    max_build_size = min(6, len(ITEM_POOL))
 
-    max_build_size = min(6, len(selected_items))
+    best_build = None
+    best_score = float('-inf')
+    best_stats = None
+    best_cost = 0
 
-    all_builds = []
     for r in range(1, max_build_size + 1):
-        for combo in combinations(selected_items, r):
+        for combo in combinations(ITEM_POOL, r):
             total_cost = sum(item.cost for item in combo)
             if total_cost <= budget:
                 stats = evaluate_build(combo)
                 score = stats.get(optimization_target, 0)
-                all_builds.append((combo, score, stats, total_cost))
+                if score > best_score:
+                    best_score = score
+                    best_build = combo
+                    best_stats = stats
+                    best_cost = total_cost
 
-    if not all_builds:
+    if best_build is None:
         st.warning("No builds found within your budget!")
-        return
-
-    all_builds.sort(key=lambda x: x[1], reverse=True)
-
-    max_results = st.slider("Number of top builds to display", 1, 20, 5)
-
-    st.subheader(f"Top Builds for optimizing {optimization_target} within budget {budget}")
-
-    for idx, (combo, score, stats, cost) in enumerate(all_builds[:max_results], start=1):
-        st.markdown(f"### Build #{idx} (Score: {score:.4f}, Cost: {cost})")
-        st.markdown("**Items:** " + ", ".join(item.name for item in combo))
+    else:
+        st.subheader(f"Best Build optimizing {optimization_target} within budget {budget}")
+        st.markdown(f"**Total Cost:** {best_cost}")
+        st.markdown("**Items:** " + ", ".join(item.name for item in best_build))
         st.markdown("**Stats:**")
-        st.json({k: round(v, 4) for k, v in stats.items()})
+        st.json({k: round(v, 4) for k, v in best_stats.items()})
 
 if __name__ == "__main__":
     main()
