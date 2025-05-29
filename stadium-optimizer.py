@@ -11,11 +11,14 @@ STAT_KEYS = [
 
 OPTIMIZATION_TARGETS = STAT_KEYS + ["Effective HP", "Weapon DPS", "Ability DPS"]
 
+CHARACTERS = ["Juno", "Kiriko", "Mercy", "Mei"]
+
 class Item:
-    def __init__(self, name: str, stats: Dict[str, float], cost: float):
+    def __init__(self, name: str, stats: Dict[str, float], cost: float, character: str = None):
         self.name = name
         self.stats = stats
         self.cost = cost
+        self.character = character  # None means available for all characters
 
 def combine_stats(items: List[Item]) -> Dict[str, float]:
     combined = {
@@ -73,14 +76,16 @@ def evaluate_build(items: List[Item]) -> Dict[str, float]:
     combined_stats.update(derived_stats)
     return combined_stats
 
+# Example item pool with character restrictions (character=None means available for all)
 ITEM_POOL = [
     Item("Item A", {"HP": 50, "Weapon Power": 0.1, "Cooldown Reduction": 0.1}, cost=150),
     Item("Item B", {"Armor": 30, "Damage Reduction": 0.05, "Attack Speed": 0.05}, cost=120),
     Item("Item C", {"Shields": 40, "Ability Power": 0.15}, cost=180),
     Item("Item D", {"Max Ammo": 20, "Reload Speed": 0.1}, cost=90),
-    Item("Item E", {"Melee Damage": 0.2, "Critical Hit Damage": 0.25}, cost=200),
-    Item("Item F", {"Move Speed": 0.1, "Weapon Lifesteal": 0.05}, cost=110),
-    Item("Item G", {"Ability Lifesteal": 0.07, "Cooldown Reduction": 0.15}, cost=170),
+    Item("Item E", {"Melee Damage": 0.2, "Critical Hit Damage": 0.25}, cost=200, character="Juno"),
+    Item("Item F", {"Move Speed": 0.1, "Weapon Lifesteal": 0.05}, cost=110, character="Kiriko"),
+    Item("Item G", {"Ability Lifesteal": 0.07, "Cooldown Reduction": 0.15}, cost=170, character="Mercy"),
+    Item("Item H", {"HP": 70, "Armor": 20}, cost=130, character="Mei"),
 ]
 
 def format_stat(name, value):
@@ -107,10 +112,14 @@ def display_stats(title: str, stats: Dict[str, float]):
 def main():
     st.title("Game Build Optimizer")
 
+    selected_character = st.selectbox("Select Character:", CHARACTERS)
     optimization_target = st.selectbox("Select Optimization Target:", OPTIMIZATION_TARGETS)
     budget = st.number_input("Enter your current budget (money):", min_value=0, value=500, step=10)
 
-    max_build_size = min(6, len(ITEM_POOL))
+    # Filter items to those available for the selected character
+    available_items = [item for item in ITEM_POOL if (item.character is None or item.character == selected_character)]
+
+    max_build_size = min(6, len(available_items))
 
     best_build = None
     best_score = float('-inf')
@@ -118,7 +127,7 @@ def main():
     best_cost = 0
 
     for r in range(1, max_build_size + 1):
-        for combo in combinations(ITEM_POOL, r):
+        for combo in combinations(available_items, r):
             total_cost = sum(item.cost for item in combo)
             if total_cost <= budget:
                 stats = evaluate_build(combo)
@@ -130,9 +139,9 @@ def main():
                     best_cost = total_cost
 
     if best_build is None:
-        st.warning("No builds found within your budget!")
+        st.warning("No builds found within your budget for the selected character!")
     else:
-        st.subheader(f"Best Build optimizing {optimization_target} within budget {budget}")
+        st.subheader(f"Best Build for {selected_character} optimizing {optimization_target} within budget {budget}")
         st.markdown(f"**Total Cost:** {best_cost}")
         st.markdown("**Items:** " + ", ".join(item.name for item in best_build))
         st.markdown("---")
