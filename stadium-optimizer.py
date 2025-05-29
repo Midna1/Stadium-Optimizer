@@ -17,25 +17,25 @@ CHARACTERS = ["Juno", "Kiriko", "Mercy", "Mei"]
 CHARACTER_BASE_STATS = {
     "Juno": {"HP": 75, "Shields": 150, "Armor": 0, "Damage Reduction": 0,
              "Weapon Power": 0, "Ability Power": 0, "Attack Speed": 0,
-             "Cooldown Reduction": 1, "Max Ammo": 0, "Weapon Lifesteal": 0,
+             "Cooldown Reduction": 0, "Max Ammo": 0, "Weapon Lifesteal": 0,
              "Ability Lifesteal": 0, "Move Speed": 0, "Reload Speed": 0,
              "Melee Damage": 0, "Critical Hit Damage": 0},
 
     "Kiriko": {"HP": 225, "Shields": 0, "Armor": 0, "Damage Reduction": 0,
                "Weapon Power": 0, "Ability Power": 0, "Attack Speed": 0,
-               "Cooldown Reduction": 1, "Max Ammo": 0, "Weapon Lifesteal": 0,
+               "Cooldown Reduction": 0, "Max Ammo": 0, "Weapon Lifesteal": 0,
                "Ability Lifesteal": 0, "Move Speed": 0, "Reload Speed": 0,
                "Melee Damage": 0, "Critical Hit Damage": 0},
 
     "Mercy": {"HP": 225, "Shields": 0, "Armor": 0, "Damage Reduction": 0,
               "Weapon Power": 0, "Ability Power": 0, "Attack Speed": 0,
-              "Cooldown Reduction": 1, "Max Ammo": 0, "Weapon Lifesteal": 0,
+              "Cooldown Reduction": 0, "Max Ammo": 0, "Weapon Lifesteal": 0,
               "Ability Lifesteal": 0, "Move Speed": 0, "Reload Speed": 0,
               "Melee Damage": 0, "Critical Hit Damage": 0},
 
     "Mei": {"HP": 300, "Shields": 0, "Armor": 0, "Damage Reduction": 0,
             "Weapon Power": 0, "Ability Power": 0, "Attack Speed": 0,
-            "Cooldown Reduction": 1, "Max Ammo": 0, "Weapon Lifesteal": 0,
+            "Cooldown Reduction": 0, "Max Ammo": 0, "Weapon Lifesteal": 0,
             "Ability Lifesteal": 0, "Move Speed": 0, "Reload Speed": 0,
             "Melee Damage": 0, "Critical Hit Damage": 0},
 }
@@ -50,21 +50,21 @@ class Item:
 def combine_stats(base_stats: Dict[str, float], items: List[Item]) -> Dict[str, float]:
     combined = base_stats.copy()
 
-    # Cooldown Reduction starts at 1, so multiply 1 - each item reduction
-    combined["Cooldown Reduction"] = 1
+    # Initialize cooldown reduction as 1 (no reduction)
+    cooldown_mult = 1.0
 
     for item in items:
         for stat, value in item.stats.items():
             if stat == "Cooldown Reduction":
-                combined[stat] *= (1 - value)
+                cooldown_mult *= (1 - value)
             elif stat in combined:
                 combined[stat] += value
             else:
                 combined[stat] = value
 
+    combined["Cooldown Reduction"] = 1 - cooldown_mult
     combined["Damage Reduction"] = min(combined.get("Damage Reduction", 0), 1.0)
     combined["Total HP"] = combined.get("HP", 0) + combined.get("Shields", 0) + combined.get("Armor", 0)
-    combined["Cooldown Reduction"] = 1 - combined["Cooldown Reduction"]
 
     return combined
 
@@ -78,6 +78,7 @@ def calculate_derived_stats(stats: Dict[str, float]) -> Dict[str, float]:
     base_attack_speed = 1
 
     weapon_dps = base_weapon_damage * (1 + stats["Weapon Power"]) * (1 + stats["Attack Speed"]) * base_attack_speed
+    # Cooldown reduction applies only to Ability DPS
     ability_dps = base_ability_damage * (1 + stats["Ability Power"]) / (1 - stats["Cooldown Reduction"])
 
     return {
@@ -86,12 +87,7 @@ def calculate_derived_stats(stats: Dict[str, float]) -> Dict[str, float]:
         "Ability DPS": ability_dps,
     }
 
-def evaluate_build(base_stats: Dict[str, float], items: List[Item]) -> Dict[str, float]:
-    combined_stats = combine_stats(base_stats, items)
-    derived_stats = calculate_derived_stats(combined_stats)
-    combined_stats.update(derived_stats)
-    return combined_stats
-
+# Example items (add your own as needed)
 ITEM_POOL = [
     Item("Item A", {"HP": 50, "Weapon Power": 0.1, "Cooldown Reduction": 0.1}, cost=150),
     Item("Item B", {"Armor": 30, "Damage Reduction": 0.05, "Attack Speed": 0.05}, cost=120),
@@ -124,6 +120,40 @@ def display_stats(title: str, stats: Dict[str, float]):
     for name, val in stats.items():
         st.markdown(f"- **{name}:** {format_stat(name, val)}")
 
+def get_relevant_stats(target: str, all_stats: Dict[str, float]) -> Dict[str, float]:
+    relevant_stats_map = {
+        "HP": ["HP", "Shields", "Armor", "Total HP", "Damage Reduction", "Effective HP"],
+        "Shields": ["Shields", "HP", "Armor", "Total HP"],
+        "Armor": ["Armor", "HP", "Shields", "Total HP", "Damage Reduction", "Effective HP"],
+        "Damage Reduction": ["Damage Reduction", "HP", "Shields", "Armor", "Effective HP"],
+        "Total HP": ["Total HP", "HP", "Shields", "Armor", "Damage Reduction", "Effective HP"],
+
+        "Weapon Power": ["Weapon Power", "Attack Speed", "Weapon DPS", "Cooldown Reduction"],
+        "Ability Power": ["Ability Power", "Cooldown Reduction", "Ability DPS"],
+        "Attack Speed": ["Attack Speed", "Weapon Power", "Weapon DPS"],
+        "Cooldown Reduction": ["Cooldown Reduction", "Ability Power", "Ability DPS"],
+
+        "Max Ammo": ["Max Ammo"],
+        "Weapon Lifesteal": ["Weapon Lifesteal"],
+        "Ability Lifesteal": ["Ability Lifesteal"],
+        "Move Speed": ["Move Speed"],
+        "Reload Speed": ["Reload Speed"],
+        "Melee Damage": ["Melee Damage", "Critical Hit Damage"],
+        "Critical Hit Damage": ["Critical Hit Damage", "Melee Damage"],
+
+        "Effective HP": ["Effective HP", "Total HP", "Damage Reduction"],
+        "Weapon DPS": ["Weapon DPS", "Weapon Power", "Attack Speed"],
+        "Ability DPS": ["Ability DPS", "Ability Power", "Cooldown Reduction"],
+    }
+    keys_to_show = relevant_stats_map.get(target, [target])
+    return {k: all_stats[k] for k in keys_to_show if k in all_stats}
+
+def evaluate_build(base_stats: Dict[str, float], items: List[Item]) -> Dict[str, float]:
+    combined_stats = combine_stats(base_stats, items)
+    derived_stats = calculate_derived_stats(combined_stats)
+    combined_stats.update(derived_stats)
+    return combined_stats
+
 def main():
     st.title("Game Build Optimizer")
 
@@ -133,7 +163,7 @@ def main():
 
     base_stats = CHARACTER_BASE_STATS[selected_character]
 
-    # Filter items to those available for the selected character
+    # Filter items for selected character
     available_items = [item for item in ITEM_POOL if (item.character is None or item.character == selected_character)]
 
     max_build_size = min(6, len(available_items))
@@ -163,13 +193,8 @@ def main():
         st.markdown("**Items:** " + ", ".join(item.name for item in best_build))
         st.markdown("---")
 
-        derived_keys = {"Effective HP", "Weapon DPS", "Ability DPS"}
-
-        normal_stats = {k: v for k, v in best_stats.items() if k not in derived_keys}
-        derived_stats = {k: best_stats[k] for k in derived_keys if k in best_stats}
-
-        display_stats("Stats", normal_stats)
-        display_stats("Derived Stats", derived_stats)
+        filtered_stats = get_relevant_stats(optimization_target, best_stats)
+        display_stats("Relevant Stats", filtered_stats)
 
 if __name__ == "__main__":
     main()
