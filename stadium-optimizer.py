@@ -190,7 +190,9 @@ def main():
     else:
         st.subheader(f"Best Build for {selected_character} optimizing {optimization_target} within budget {budget}")
         st.markdown(f"**Total Cost:** {best_cost}")
-        st.markdown("**Items:** " + ", ".join(item.name for item in best_build))
+        st.markdown("**Items:**")
+        for item in best_build:
+            st.markdown(f"- {item.name}")
         st.markdown("---")
 
         filtered_stats = get_relevant_stats(optimization_target, best_stats)
