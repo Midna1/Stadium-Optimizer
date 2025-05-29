@@ -104,6 +104,7 @@ def calculate_build_stats(items, base_stats):
         "Critical Hit Damage": 0.0,
     }
 
+    # Add item stats
     for item in items:
         for stat, val in item.stats.items():
             if stat == "Cooldown Reduction":
@@ -111,8 +112,14 @@ def calculate_build_stats(items, base_stats):
             elif stat in stats:
                 stats[stat] += val
 
+    # Clamp cooldown reduction min 0.1
     stats["Cooldown Reduction"] = max(stats["Cooldown Reduction"], 0.1)
+    # Apply cooldown reduction to Ability Power
     stats["Ability Power"] *= stats["Cooldown Reduction"]
+
+    # Handle Lock-On Shield extra HP: 50% of Shields added to HP
+    if any(item.name == "Lock-On Shield" for item in items):
+        stats["HP"] += 0.5 * stats["Shields"]
 
     return stats
 
