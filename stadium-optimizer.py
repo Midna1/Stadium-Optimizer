@@ -63,7 +63,6 @@ ITEM_POOL = [
         "Armor Multiplier": 0.08,
         "Shields Multiplier": 0.08,
     }, cost=5000, category="Survival"),
-    Item("Bloodbound", {"HP": 50}, cost=9000, category="Survival"),
     Item("Geneticist's Vial", {"HP": 25}, cost=9000, category="Survival"),
     Item("Divine Intervention", {"Shields": 50, "Damage Reduction": 0.15}, cost=95000, category="Survival"),
     Item("Gloom Gauntlet", {"Armor": 50, "Melee Damage": 0.15}, cost=10000, category="Survival"),
