@@ -84,6 +84,22 @@ ITEM_POOL = [
     Item("Item G", {"Ability Lifesteal": 0.07, "Cooldown Reduction": 0.15}, cost=170),
 ]
 
+def format_stat(name, value):
+    percent_stats = {
+        "Weapon Power", "Ability Power", "Attack Speed",
+        "Cooldown Reduction", "Damage Reduction",
+        "Weapon Lifesteal", "Ability Lifesteal",
+        "Move Speed", "Reload Speed",
+        "Melee Damage", "Critical Hit Damage"
+    }
+    if name in percent_stats:
+        return f"{value * 100:.2f}%"
+    else:
+        if abs(value - round(value)) < 1e-6:
+            return str(int(round(value)))
+        else:
+            return f"{value:.2f}"
+
 def main():
     st.title("Game Build Optimizer")
 
@@ -115,8 +131,20 @@ def main():
         st.subheader(f"Best Build optimizing {optimization_target} within budget {budget}")
         st.markdown(f"**Total Cost:** {best_cost}")
         st.markdown("**Items:** " + ", ".join(item.name for item in best_build))
+        st.markdown("---")
+
+        # Separate derived stats
+        derived_keys = {"Effective HP", "Weapon DPS", "Ability DPS"}
+
         st.markdown("**Stats:**")
-        st.json({k: round(v, 4) for k, v in best_stats.items()})
+        normal_stats = {k: v for k, v in best_stats.items() if k not in derived_keys}
+        stat_data = [(name, format_stat(name, val)) for name, val in normal_stats.items()]
+        st.table(stat_data)
+
+        st.markdown("**Derived Stats:**")
+        derived_stats = {k: best_stats[k] for k in derived_keys if k in best_stats}
+        derived_data = [(name, format_stat(name, val)) for name, val in derived_stats.items()]
+        st.table(derived_data)
 
 if __name__ == "__main__":
     main()
