@@ -13,29 +13,45 @@ OPTIMIZATION_TARGETS = STAT_KEYS + ["Effective HP", "Weapon DPS", "Ability DPS"]
 
 CHARACTERS = ["Juno", "Kiriko", "Mercy", "Mei"]
 
+# Base stats per character
+CHARACTER_BASE_STATS = {
+    "Juno": {"HP": 75, "Shields": 150, "Armor": 0, "Damage Reduction": 0,
+             "Weapon Power": 0, "Ability Power": 0, "Attack Speed": 0,
+             "Cooldown Reduction": 1, "Max Ammo": 0, "Weapon Lifesteal": 0,
+             "Ability Lifesteal": 0, "Move Speed": 0, "Reload Speed": 0,
+             "Melee Damage": 0, "Critical Hit Damage": 0},
+
+    "Kiriko": {"HP": 225, "Shields": 0, "Armor": 0, "Damage Reduction": 0,
+               "Weapon Power": 0, "Ability Power": 0, "Attack Speed": 0,
+               "Cooldown Reduction": 1, "Max Ammo": 0, "Weapon Lifesteal": 0,
+               "Ability Lifesteal": 0, "Move Speed": 0, "Reload Speed": 0,
+               "Melee Damage": 0, "Critical Hit Damage": 0},
+
+    "Mercy": {"HP": 225, "Shields": 0, "Armor": 0, "Damage Reduction": 0,
+              "Weapon Power": 0, "Ability Power": 0, "Attack Speed": 0,
+              "Cooldown Reduction": 1, "Max Ammo": 0, "Weapon Lifesteal": 0,
+              "Ability Lifesteal": 0, "Move Speed": 0, "Reload Speed": 0,
+              "Melee Damage": 0, "Critical Hit Damage": 0},
+
+    "Mei": {"HP": 300, "Shields": 0, "Armor": 0, "Damage Reduction": 0,
+            "Weapon Power": 0, "Ability Power": 0, "Attack Speed": 0,
+            "Cooldown Reduction": 1, "Max Ammo": 0, "Weapon Lifesteal": 0,
+            "Ability Lifesteal": 0, "Move Speed": 0, "Reload Speed": 0,
+            "Melee Damage": 0, "Critical Hit Damage": 0},
+}
+
 class Item:
     def __init__(self, name: str, stats: Dict[str, float], cost: float, character: str = None):
         self.name = name
         self.stats = stats
         self.cost = cost
-        self.character = character  # None means available for all characters
+        self.character = character  # None means usable by all characters
 
-def combine_stats(items: List[Item]) -> Dict[str, float]:
-    combined = {
-        "HP": 0, "Shields": 0, "Armor": 0,
-        "Damage Reduction": 0,
-        "Weapon Power": 0,
-        "Ability Power": 0,
-        "Attack Speed": 0,
-        "Cooldown Reduction": 1,
-        "Max Ammo": 0,
-        "Weapon Lifesteal": 0,
-        "Ability Lifesteal": 0,
-        "Move Speed": 0,
-        "Reload Speed": 0,
-        "Melee Damage": 0,
-        "Critical Hit Damage": 0,
-    }
+def combine_stats(base_stats: Dict[str, float], items: List[Item]) -> Dict[str, float]:
+    combined = base_stats.copy()
+
+    # Cooldown Reduction starts at 1, so multiply 1 - each item reduction
+    combined["Cooldown Reduction"] = 1
 
     for item in items:
         for stat, value in item.stats.items():
@@ -46,8 +62,8 @@ def combine_stats(items: List[Item]) -> Dict[str, float]:
             else:
                 combined[stat] = value
 
-    combined["Damage Reduction"] = min(combined["Damage Reduction"], 1.0)
-    combined["Total HP"] = combined["HP"] + combined["Shields"] + combined["Armor"]
+    combined["Damage Reduction"] = min(combined.get("Damage Reduction", 0), 1.0)
+    combined["Total HP"] = combined.get("HP", 0) + combined.get("Shields", 0) + combined.get("Armor", 0)
     combined["Cooldown Reduction"] = 1 - combined["Cooldown Reduction"]
 
     return combined
@@ -70,13 +86,12 @@ def calculate_derived_stats(stats: Dict[str, float]) -> Dict[str, float]:
         "Ability DPS": ability_dps,
     }
 
-def evaluate_build(items: List[Item]) -> Dict[str, float]:
-    combined_stats = combine_stats(items)
+def evaluate_build(base_stats: Dict[str, float], items: List[Item]) -> Dict[str, float]:
+    combined_stats = combine_stats(base_stats, items)
     derived_stats = calculate_derived_stats(combined_stats)
     combined_stats.update(derived_stats)
     return combined_stats
 
-# Example item pool with character restrictions (character=None means available for all)
 ITEM_POOL = [
     Item("Item A", {"HP": 50, "Weapon Power": 0.1, "Cooldown Reduction": 0.1}, cost=150),
     Item("Item B", {"Armor": 30, "Damage Reduction": 0.05, "Attack Speed": 0.05}, cost=120),
@@ -116,6 +131,8 @@ def main():
     optimization_target = st.selectbox("Select Optimization Target:", OPTIMIZATION_TARGETS)
     budget = st.number_input("Enter your current budget (money):", min_value=0, value=500, step=10)
 
+    base_stats = CHARACTER_BASE_STATS[selected_character]
+
     # Filter items to those available for the selected character
     available_items = [item for item in ITEM_POOL if (item.character is None or item.character == selected_character)]
 
@@ -130,7 +147,7 @@ def main():
         for combo in combinations(available_items, r):
             total_cost = sum(item.cost for item in combo)
             if total_cost <= budget:
-                stats = evaluate_build(combo)
+                stats = evaluate_build(base_stats, combo)
                 score = stats.get(optimization_target, 0)
                 if score > best_score:
                     best_score = score
