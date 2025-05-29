@@ -135,7 +135,7 @@ def display_relevant_stats(stats, target):
 st.title("Build Optimizer")
 
 character = st.selectbox("Character", list(BASE_STATS.keys()))
-max_cost = st.number_input("Max Budget", 0, 50000, 10000, 100)
+max_cost = st.number_input("Max Budget", 0, 500000, 10000, 100)
 target = st.selectbox("Optimization Target", list(target_relevant_stats.keys()))
 
 filtered_items = filter_items_for_target(
