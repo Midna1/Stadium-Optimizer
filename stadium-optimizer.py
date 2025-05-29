@@ -3,12 +3,14 @@ from itertools import combinations
 
 # --- Item class ---
 class Item:
-    def __init__(self, name, stats, cost, category, character=None):
+    def __init__(self, name, stats, cost, category, character=None, extra_effect=None):
         self.name = name
-        self.stats = stats
+        self.stats = stats  # dict of stat_name: value
         self.cost = cost
         self.category = category
         self.character = character
+        self.extra_effect = extra_effect  # Optional function for special effects
+
 # --- Special effect function for Pulsar Torpedos ---
 def pulsar_torpedos_effect(stats):
     # Adds 20 base damage + 50% of ability power (expressed as percentage, e.g. 0.10)
