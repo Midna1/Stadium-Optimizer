@@ -33,6 +33,15 @@ ITEM_POOL = [
     Item("Liquid Nitrogen", {"HP": 25, "Ability Power": 0.10}, 11000, "Ability"),
     Item("Mark of the Kitsune", {"Ability Power": 0.10}, 11000, "Ability"),
     Item("Champion's Kit", {"Ability Power": 0.40}, 14000, "Ability"),
+
+    #Juno Exclusive
+    Item("Lock-On Shield", {"Ability Power": 0.1001}, cost=4000, category="Ability", character="Juno"),
+    Item("Lux Loop", {"Ability Power": 0.1001}, cost=4000, category="Ability", character="Juno"),
+    Item("Pulsar Torpedos", {"Ability Lifesteal": 0.10}, cost=10000, category="Ability", character="Juno"),
+    Item("Solar Shielding", {"Ability Power": 0.15}, cost=10000, category="Ability", character="Juno"),
+    Item("Red Promise Regulator", {"Shields": 50, "Ability Power": 0.15}, cost=10000, category="Ability", character="Juno"),
+
+    
 ]
 
 # --- Base character stats ---
