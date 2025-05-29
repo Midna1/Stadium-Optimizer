@@ -1,20 +1,16 @@
 import streamlit as st
 from itertools import combinations
 
-# --- Item class with extra_effect support ---
+# --- Item class ---
 class Item:
     def __init__(self, name, stats, cost, category, character=None, extra_effect=None):
         self.name = name
-        self.stats = stats
+        self.stats = stats  # dict of stat_name: value
         self.cost = cost
-        self.category = category
-        self.character = character
-        self.extra_effect = extra_effect
+        self.category = category  # "Weapon", "Ability", "Survival"
+        self.character = character  # None or character string
+        self.extra_effect = extra_effect  # function(stats) -> float
 
-# --- Pulsar Torpedos effect function ---
-def pulsar_torpedos_effect(stats, base_value=20):
-    ability_power = stats.get("Ability Power", 0.0)
-    return base_value * (1 + ability_power)
 # --- Item pool ---
 ITEM_POOL = [
     Item("Power Playbook", {"Ability Power": 0.10}, 1000, "Ability"),
@@ -37,16 +33,15 @@ ITEM_POOL = [
     Item("Iridescent Iris", {"Ability Power": 0.20, "Cooldown Reduction": 0.10}, 11000, "Ability"),
     Item("Liquid Nitrogen", {"HP": 25, "Ability Power": 0.10}, 11000, "Ability"),
     Item("Mark of the Kitsune", {"Ability Power": 0.10}, 11000, "Ability"),
-    Item("Champion's Kit", {"Ability Power": 0.40}, 14000, "Ability"),
+    Item("Champion's Kit", {"Ability Power": 0.40}, 13500, "Ability"),
 
-    #Juno Exclusive
-    Item("Lock-On Shield", {"Ability Power": 0.1001}, cost=4000, category="Ability", character="Juno"),
-    Item("Lux Loop", {"Ability Power": 0.1001}, cost=4000, category="Ability", character="Juno"),
-    Item("Pulsar Torpedos", {"Ability Lifesteal": 0.10}, 10000, "Ability", character="Juno", extra_effect=pulsar_torpedos_effect),
-    Item("Solar Shielding", {"Ability Power": 0.15}, cost=10000, category="Ability", character="Juno"),
-    Item("Red Promise Regulator", {"Shields": 50, "Ability Power": 0.15}, cost=10000, category="Ability", character="Juno"),
-
-    
+    # Juno-specific items
+    Item("Lock-On Shield", {"Ability Power": 0.1001}, 4000, "Ability", character="Juno"),
+    Item("Lux Loop", {"Ability Power": 0.1001}, 4000, "Ability", character="Juno"),
+    Item("Pulsar Torpedos", {"Ability Lifesteal": 0.10}, 10000, "Ability", character="Juno",
+         extra_effect=lambda stats: 20 * (1 + stats.get("Ability Power", 0.0))),
+    Item("Solar Shielding", {"Ability Power": 0.15}, 10000, "Ability", character="Juno"),
+    Item("Red Promise Regulator", {"Shields": 50, "Ability Power": 0.15}, 10000, "Ability", character="Juno"),
 ]
 
 # --- Base stats ---
@@ -57,7 +52,7 @@ BASE_STATS = {
     "Mei": {"HP": 300, "Shields": 0, "Armor": 0},
 }
 
-# --- Optimization target stat map ---
+# --- Optimization targets ---
 target_relevant_stats = {
     "HP": {"HP"},
     "Shields": {"Shields"},
@@ -65,7 +60,8 @@ target_relevant_stats = {
     "Damage Reduction": {"Damage Reduction"},
     "Total HP": {"HP", "Shields", "Armor"},
     "Weapon Power": {"Weapon Power"},
-    "Ability Power": {"Ability Power", "Cooldown Reduction"},
+    "Ability Damage": {"Ability Power", "Cooldown Reduction"},
+    "Ability DPS": {"Ability Power", "Cooldown Reduction"},
     "Attack Speed": {"Attack Speed"},
     "Cooldown Reduction": {"Cooldown Reduction", "Ability Power"},
     "Max Ammo": {"Max Ammo"},
@@ -77,10 +73,8 @@ target_relevant_stats = {
     "Critical Hit Damage": {"Critical Hit Damage"},
     "Effective HP": {"HP", "Shields", "Armor", "Damage Reduction"},
     "Weapon DPS": {"Weapon Power", "Attack Speed", "Reload Speed", "Critical Hit Damage"},
-    "Ability DPS": {"Ability Power", "Cooldown Reduction", "Ability Lifesteal"},
 }
 
-# --- Helper functions ---
 def filter_items_for_target(items, target):
     relevant_stats = target_relevant_stats.get(target, set())
     return [
@@ -113,56 +107,57 @@ def calculate_build_stats(items, base_stats):
                 stats["Cooldown Reduction"] *= (1 - val)
             elif stat in stats:
                 stats[stat] += val
-            else:
-                stats[stat] = val
 
-    if stats["Cooldown Reduction"] < 0.1:
-        stats["Cooldown Reduction"] = 0.1
-
+    stats["Cooldown Reduction"] = max(stats["Cooldown Reduction"], 0.1)
     stats["Ability Power"] *= stats["Cooldown Reduction"]
+
     return stats
 
 def evaluate_build(stats, target, items):
-    if target == "Ability DPS":
-        base_ability_dps = 80
-        ability_power = 1 + stats.get("Ability Power", 0)
-        cooldown_mult = stats.get("Cooldown Reduction", 1.0)
-        ability_lifesteal = 1 + stats.get("Ability Lifesteal", 0)
+    base_damage = 100
+    ap = stats.get("Ability Power", 0.0)
+    bonus = sum(item.extra_effect(stats) for item in items if item.extra_effect)
 
-        bonus_damage = sum(item.extra_effect(stats) for item in items if item.extra_effect)
-        return (base_ability_dps + bonus_damage) * ability_power * (1 / cooldown_mult) * ability_lifesteal
-
-    if target == "Effective HP":
-        total_hp = stats["HP"] + stats["Shields"] + stats["Armor"]
-        dmg_red = stats.get("Damage Reduction", 0)
-        return total_hp / (1 - min(dmg_red, 0.99))
-
-    if target == "Weapon DPS":
-        base_dps = 100
-        return base_dps * (1 + stats["Weapon Power"]) * (1 + stats["Attack Speed"]) * (1 + stats["Reload Speed"]) * (1 + stats["Critical Hit Damage"])
-
-    if target == "Cooldown Reduction":
-        return 1 - stats["Ability Power"]
-
-    if target in stats:
-        return stats[target]
-    if target == "Total HP":
-        return stats["HP"] + stats["Shields"] + stats["Armor"]
-    return 0
+    if target == "Ability Damage":
+        return base_damage * (1 + ap) + bonus
+    elif target == "Ability DPS":
+        base_cooldown = 6  # seconds
+        effective_cd = base_cooldown * stats.get("Cooldown Reduction", 1.0)
+        total_damage = base_damage * (1 + ap) + bonus
+        return total_damage / effective_cd if effective_cd > 0 else 0
+    elif target == "HP":
+        return stats.get("HP", 0)
+    elif target == "Shields":
+        return stats.get("Shields", 0)
+    elif target == "Armor":
+        return stats.get("Armor", 0)
+    elif target == "Total HP":
+        return stats.get("HP", 0) + stats.get("Shields", 0) + stats.get("Armor", 0)
+    elif target == "Weapon Power":
+        return stats.get("Weapon Power", 0)
+    elif target == "Cooldown Reduction":
+        return 1 - stats.get("Cooldown Reduction", 1.0)
+    elif target == "Weapon DPS":
+        return 100 * (1 + stats["Weapon Power"]) * (1 + stats["Attack Speed"]) * (1 + stats["Reload Speed"]) * (1 + stats["Critical Hit Damage"])
+    elif target == "Effective HP":
+        total = stats["HP"] + stats["Shields"] + stats["Armor"]
+        dr = min(stats["Damage Reduction"], 0.99)
+        return total / (1 - dr)
+    else:
+        return stats.get(target, 0)
 
 def display_relevant_stats(stats, target):
     relevant_stats = target_relevant_stats.get(target, set())
     lines = []
-    for base in ["HP", "Shields", "Armor"]:
-        if base in relevant_stats or target in ["Total HP", "Effective HP"]:
-            lines.append(f"{base}: {stats[base]}")
-
+    for s in ["HP", "Shields", "Armor"]:
+        if s in relevant_stats or target in ["Total HP", "Effective HP"]:
+            lines.append(f"{s}: {stats.get(s, 0)}")
     for stat in relevant_stats:
         if stat in ["HP", "Shields", "Armor"]:
             continue
         val = stats.get(stat)
         if isinstance(val, float) and abs(val) < 10:
-            lines.append(f"{stat}: {val * 100:.1f}%")
+            lines.append(f"{stat}: {val*100:.1f}%")
         else:
             lines.append(f"{stat}: {val}")
     return lines
@@ -171,14 +166,13 @@ def display_relevant_stats(stats, target):
 st.title("Game Build Optimizer")
 
 character = st.selectbox("Choose your character", list(BASE_STATS.keys()))
-money = st.number_input("How much money do you have?", min_value=0, value=20000, step=100)
-optimization_target = st.selectbox("Select optimization target", list(target_relevant_stats.keys()))
+money = st.number_input("Enter your budget", min_value=0, value=500, step=10)
+optimization_target = st.selectbox("Optimization Target", list(target_relevant_stats.keys()) + ["Ability DPS"])
 
-base_stats = BASE_STATS[character]
 available_items = [item for item in ITEM_POOL if item.character is None or item.character == character]
 filtered_items = filter_items_for_target(available_items, optimization_target)
 
-st.write(f"Items relevant to target: {len(filtered_items)}")
+base_stats = BASE_STATS[character]
 
 best_value = None
 best_build = None
@@ -188,21 +182,21 @@ for r in range(1, 7):
         total_cost = sum(item.cost for item in combo)
         if total_cost > money:
             continue
-        build_stats = calculate_build_stats(combo, base_stats)
-        value = evaluate_build(build_stats, optimization_target, combo)
+        stats = calculate_build_stats(combo, base_stats)
+        value = evaluate_build(stats, optimization_target, combo)
         if best_value is None or value > best_value:
             best_value = value
             best_build = combo
 
 if best_build:
-    st.subheader("Best Build Found:")
+    st.subheader("Best Build Found")
     st.write(f"Total Cost: {sum(item.cost for item in best_build)}")
     for item in best_build:
-        st.write(f"- {item.name} ({item.cost})")
-    st.subheader("Relevant Stats:")
-    final_stats = calculate_build_stats(best_build, base_stats)
-    for line in display_relevant_stats(final_stats, optimization_target):
+        st.markdown(f"**{item.name}** (Cost: {item.cost})")
+    st.subheader(f"Build Stats Relevant to '{optimization_target}'")
+    stats = calculate_build_stats(best_build, base_stats)
+    for line in display_relevant_stats(stats, optimization_target):
         st.write(line)
-    st.write(f"Optimization Value ({optimization_target}): {best_value:.3f}")
+    st.write(f"**Optimization Value ({optimization_target}): {best_value:.2f}**")
 else:
     st.write("No valid build found within your budget.")
