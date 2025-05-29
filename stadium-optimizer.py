@@ -5,10 +5,10 @@ from itertools import combinations
 class Item:
     def __init__(self, name, stats, cost, category, character=None):
         self.name = name
-        self.stats = stats  # dict of stat_name: value
+        self.stats = stats
         self.cost = cost
         self.category = category
-        self.character = character  # Optional character restriction
+        self.character = character
 
 # --- Item pool ---
 ITEM_POOL = [
@@ -43,7 +43,7 @@ BASE_STATS = {
     "Mei": {"HP": 300, "Shields": 0, "Armor": 0},
 }
 
-# --- Optimization targets and relevant stats ---
+# --- Optimization targets ---
 target_relevant_stats = {
     "HP": {"HP"},
     "Shields": {"Shields"},
@@ -63,7 +63,7 @@ target_relevant_stats = {
     "Critical Hit Damage": {"Critical Hit Damage"},
     "Effective HP": {"HP", "Shields", "Armor", "Damage Reduction"},
     "Weapon DPS": {"Weapon Power", "Attack Speed", "Reload Speed", "Critical Hit Damage"},
-    "Ability DPS": {"Ability Power", "Cooldown Reduction"},  # Exclude Ability Lifesteal
+    "Ability DPS": {"Ability Power", "Cooldown Reduction"},
 }
 
 # --- Functions ---
@@ -95,8 +95,6 @@ def calculate_build_stats(items, base):
                 stats["Cooldown Reduction"] *= (1 - val)
             elif stat in stats:
                 stats[stat] += val
-            else:
-                stats[stat] = val
     stats["Cooldown Reduction"] = max(stats["Cooldown Reduction"], 0.1)
     stats["Ability Power"] *= stats["Cooldown Reduction"]
     return stats
@@ -133,24 +131,22 @@ def display_relevant_stats(stats, target):
             lines.append(f"{stat}: {val}")
     return lines
 
-# --- Streamlit App ---
+# --- Streamlit UI ---
 st.title("Build Optimizer")
 
-character = st.selectbox("Choose character", list(BASE_STATS.keys()))
-max_cost = st.number_input("Budget", 0, 50000, 10000, 100)
+character = st.selectbox("Character", list(BASE_STATS.keys()))
+max_cost = st.number_input("Max Budget", 0, 50000, 10000, 100)
 target = st.selectbox("Optimization Target", list(target_relevant_stats.keys()))
 
 filtered_items = filter_items_for_target(
     [i for i in ITEM_POOL if i.character is None or i.character == character],
     target
 )
-st.write(f"Relevant Items: {len(filtered_items)}")
 
 best_score = float("-inf")
 best_build = None
 
-max_items = 6
-for r in range(1, max_items + 1):
+for r in range(1, 7):  # Up to 6 items
     for combo in combinations(filtered_items, r):
         cost = sum(i.cost for i in combo)
         if cost > max_cost:
@@ -162,18 +158,14 @@ for r in range(1, max_items + 1):
             best_build = combo
 
 if best_build:
-    st.subheader("Best Build Found")
-    st.write(f"Total Cost: {sum(i.cost for i in best_build)}")
+    st.subheader("Best Build")
+    st.write("Items:")
     for item in best_build:
-        st.markdown(f"**{item.name}** (Cost: {item.cost}, Category: {item.category})")
-        for stat, val in item.stats.items():
-            if isinstance(val, float) and abs(val) < 10:
-                st.write(f"- {stat}: {val*100:.1f}%")
-            else:
-                st.write(f"- {stat}: {val}")
-    st.subheader("Relevant Build Stats")
+        st.markdown(f"- {item.name}")
+    st.write(f"Total Cost: {sum(i.cost for i in best_build)}")
+    st.subheader("Key Stats")
     for line in display_relevant_stats(calculate_build_stats(best_build, BASE_STATS[character]), target):
         st.write(line)
-    st.write(f"Optimization Score ({target}): {best_score:.3f}")
+    st.write(f"Score ({target}): {best_score:.3f}")
 else:
-    st.write("No valid build found within your budget.")
+    st.write("No valid build found.")
