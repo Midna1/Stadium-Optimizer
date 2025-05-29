@@ -54,7 +54,7 @@ target_relevant_stats = {
     "Ability Power": {"Ability Power", "Cooldown Reduction"},
     "Attack Speed": {"Attack Speed"},
     "Cooldown Reduction": {"Cooldown Reduction", "Ability Power"},
-    "Max Ammo": {"Max Ammo"},
+    " Ammo": {" Ammo"},
     "Weapon Lifesteal": {"Weapon Lifesteal"},
     "Ability Lifesteal": {"Ability Lifesteal"},
     "Move Speed": {"Move Speed"},
@@ -80,7 +80,7 @@ def calculate_build_stats(items, base_stats):
         "HP": base_stats.get("HP", 0),
         "Shields": base_stats.get("Shields", 0),
         "Armor": base_stats.get("Armor", 0),
-        "Max Ammo": 0,
+        " Ammo": 0,
         "Weapon Power": 0.0,
         "Ability Power": 0.0,
         "Attack Speed": 0.0,
@@ -103,7 +103,7 @@ def calculate_build_stats(items, base_stats):
             else:
                 stats[stat] = val  # fallback for new stats
 
-    # Minimum cooldown floor (e.g. 90% reduction max)
+    # Minimum cooldown floor (e.g. 90% reduction )
     if stats["Cooldown Reduction"] < 0.1:
         stats["Cooldown Reduction"] = 0.1
 
@@ -131,8 +131,8 @@ def evaluate_build(stats, target):
         return stats.get("Attack Speed", 0)
     elif target == "Cooldown Reduction":
         return 1 - stats.get("Cooldown Reduction", 1)
-    elif target == "Max Ammo":
-        return stats.get("Max Ammo", 0)
+    elif target == " Ammo":
+        return stats.get(" Ammo", 0)
     elif target == "Weapon Lifesteal":
         return stats.get("Weapon Lifesteal", 0)
     elif target == "Ability Lifesteal":
@@ -173,7 +173,7 @@ def main():
 
     character = st.selectbox("Select Character", list(BASE_STATS.keys()))
     target = st.selectbox("Optimize For", list(target_relevant_stats.keys()))
-    max_cost = st.number_input("Max Total Cost", min_value=0, value=15000, step=500)
+    _cost = st.number_input(" Total Cost", min_value=0, value=15000, step=500)
 
     filtered_items = filter_items_for_target(ITEM_POOL, target)
 
@@ -182,8 +182,8 @@ def main():
     best_score = -float("inf")
     best_build = None
 
-    # For demonstration: limit max combo size to 4 to keep computation reasonable
-    max_items = 4
+    # For demonstration: limit  combo size to 4 to keep computation reasonable
+    max_items = 6
 
     for r in range(1, max_items + 1):
         for combo in combinations(filtered_items, r):
