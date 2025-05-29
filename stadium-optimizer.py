@@ -9,7 +9,7 @@ class Item:
         self.cost = cost
         self.category = category  # "Weapon", "Ability", "Survival"
         self.character = character  # None or character string
-        self.extra_effect = extra_effect  # function(stats) -> float
+        self.extra_effect = extra_effect  # function(stats) -> float or None
 
 # --- Item pool ---
 ITEM_POOL = [
@@ -36,12 +36,15 @@ ITEM_POOL = [
     Item("Champion's Kit", {"Ability Power": 0.40}, 13500, "Ability"),
 
     # Juno-specific items
-    Item("Lock-On Shield", {"Ability Power": 0.1001}, 4000, "Ability", character="Juno"),
+    Item("Lock-On Shield", {"Ability Power": 0.1001}, 4000, "Survival", character="Juno"),
     Item("Lux Loop", {"Ability Power": 0.1001}, 4000, "Ability", character="Juno"),
     Item("Pulsar Torpedos", {"Ability Lifesteal": 0.10}, 10000, "Ability", character="Juno",
          extra_effect=lambda stats: 20 * (1 + stats.get("Ability Power", 0.0))),
     Item("Solar Shielding", {"Ability Power": 0.15}, 10000, "Ability", character="Juno"),
     Item("Red Promise Regulator", {"Shields": 50, "Ability Power": 0.15}, 10000, "Ability", character="Juno"),
+    Item("Boosted Rockets", {"Shields": 25}, 4000, "Survival", character="Juno"),
+    Item("Forti-Glide", {"Shields": 75, "Damage Reduction": 0.10}, 10000, "Survival", character="Juno"),
+    Item("Sunburst Serum", {"Shields": 75}, 10000, "Survival", character="Juno"),
 ]
 
 # --- Base stats ---
@@ -52,7 +55,7 @@ BASE_STATS = {
     "Mei": {"HP": 300, "Shields": 0, "Armor": 0},
 }
 
-# --- Optimization targets ---
+# --- Optimization targets and relevant stats ---
 target_relevant_stats = {
     "HP": {"HP"},
     "Shields": {"Shields"},
@@ -156,6 +159,8 @@ def display_relevant_stats(stats, target):
         if stat in ["HP", "Shields", "Armor"]:
             continue
         val = stats.get(stat)
+        if val is None:
+            continue
         if isinstance(val, float) and abs(val) < 10:
             lines.append(f"{stat}: {val*100:.1f}%")
         else:
@@ -177,7 +182,10 @@ base_stats = BASE_STATS[character]
 best_value = None
 best_build = None
 
-for r in range(1, 7):
+# Limit max combination size to reduce runtime, adjust if needed
+MAX_ITEMS_IN_BUILD = 6
+
+for r in range(1, MAX_ITEMS_IN_BUILD + 1):
     for combo in combinations(filtered_items, r):
         total_cost = sum(item.cost for item in combo)
         if total_cost > money:
