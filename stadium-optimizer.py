@@ -68,7 +68,9 @@ target_relevant_stats = {
     "Critical Hit Damage": {"Critical Hit Damage"},
     "Effective HP": {"HP", "Shields", "Armor", "Damage Reduction"},
     "Weapon DPS": {"Weapon Power", "Attack Speed", "Reload Speed", "Critical Hit Damage"},
-    "Ability DPS": {"Ability Power", "Cooldown Reduction", "Ability Lifesteal"},
+    "Ability DPS": {"Ability Power", "Cooldown Reduction"},  # removed "Ability Lifesteal"
+}
+
 }
 
 def filter_items_for_target(items, target):
@@ -167,7 +169,7 @@ def evaluate_build(stats, target):
         ability_power = 1 + stats.get("Ability Power", 0)
         cooldown_mult = stats.get("Cooldown Reduction", 1.0)
         ability_lifesteal = 1 + stats.get("Ability Lifesteal", 0)
-        return base_ability_dps * ability_power * (1 / cooldown_mult) * ability_lifesteal
+        return base_ability_dps * ability_power * (1 / cooldown_mult)
     else:
         return 0
 
