@@ -32,7 +32,7 @@ ITEM_POOL = [
     Item("Iridescent Iris", {"Ability Power": 0.20, "Cooldown Reduction": 0.10}, 11000, "Ability"),
     Item("Liquid Nitrogen", {"HP": 25, "Ability Power": 0.10}, 11000, "Ability"),
     Item("Mark of the Kitsune", {"Ability Power": 0.10}, 11000, "Ability"),
-    Item("Champion's Kit", {"Ability Power": 0.40}, 13500, "Ability"),
+    Item("Champion's Kit", {"Ability Power": 0.40}, 14000, "Ability"),
 ]
 
 # --- Base character stats ---
