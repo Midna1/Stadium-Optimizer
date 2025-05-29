@@ -80,10 +80,13 @@ target_relevant_stats = {
 
 def filter_items_for_target(items, target):
     relevant_stats = target_relevant_stats.get(target, set())
-    return [
-        item for item in items
-        if any(stat in relevant_stats for stat in item.stats.keys()) or item.extra_effect
-    ]
+    filtered = []
+    for item in items:
+        if any(stat in relevant_stats for stat in item.stats.keys()):
+            filtered.append(item)
+        elif item.name == "Lock-On Shield" and target in {"HP", "Shields", "Effective HP", "Total HP"}:
+            filtered.append(item)
+    return filtered
 
 def calculate_build_stats(items, base_stats):
     stats = {
