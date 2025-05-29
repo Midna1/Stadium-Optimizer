@@ -21,39 +21,54 @@ def vishkar_condensor_effect(stats):
 
 # --- Item pool ---
 ITEM_POOL = [
-    # Ability items (sample subset)
     Item("Power Playbook", {"Ability Power": 0.10}, 1000, "Ability"),
     Item("Charged Plating", {"Armor": 25, "Ability Power": 0.10}, 1000, "Ability"),
     Item("Shady Spectacles", {"Ability Lifesteal": 0.10}, 1000, "Ability"),
     Item("Winning Attitude", {"HP": 25}, 1500, "Ability"),
-    # ... other Ability items omitted for brevity ...
+    Item("Custom Stock", {"Weapon Power": 0.05, "Ability Power": 0.10}, 3750, "Ability"),
+    Item("Biolight Overflow", {"HP": 25, "Ability Power": 0.05}, 4000, "Ability"),
+    Item("Energized Bracers", {"Ability Power": 0.10, "Ability Lifesteal": 0.10}, 4000, "Ability"),
+    Item("Junker Whatchamajig", {}, 4000, "Ability"),
+    Item("Wrist Wraps", {"Ability Power": 0.05, "Attack Speed": 0.10}, 4000, "Ability"),
+    Item("Multi-Tool", {"Ability Power": 0.10, "Cooldown Reduction": 0.05}, 4500, "Ability"),
+    Item("Nano-Cola", {"Ability Power": 0.20}, 6000, "Ability"),
+    Item("Three-Tap Tommygun", {"Ability Power": 0.10, "Attack Speed": 0.10}, 9500, "Ability"),
+    Item("Biotech Maximizer", {"HP": 25, "Ability Power": 0.10}, 10000, "Ability"),
+    Item("Catalytic Crystal", {"Ability Power": 0.15}, 10000, "Ability"),
+    Item("Lumerico Fusion Drive", {"Armor": 50, "Ability Power": 0.15}, 10000, "Ability"),
+    Item("Superflexor", {"HP": 25, "Weapon Power": 0.10, "Ability Power": 0.25}, 10000, "Ability"),
+    Item("Cybervenom", {"Ability Power": 0.10, "Cooldown Reduction": 0.05}, 10500, "Ability"),
+    Item("Iridescent Iris", {"Ability Power": 0.20, "Cooldown Reduction": 0.10}, 11000, "Ability"),
+    Item("Liquid Nitrogen", {"HP": 25, "Ability Power": 0.10}, 11000, "Ability"),
+    Item("Mark of the Kitsune", {"Ability Power": 0.10}, 11000, "Ability"),
+    Item("Champion's Kit", {"Ability Power": 0.40}, 13500, "Ability"),
+
+    Item("Field Rations", {}, cost=1000, category="Survival"),
+    Item("Running Shoes", {"HP": 10}, cost=1000, category="Survival"),
+    Item("Adrenaline Shot", {"HP": 25}, cost=1500, category="Survival"),
+    Item("Armored Vest", {"Armor": 25}, cost=1500, category="Survival"),
+    Item("Electrolytes", {}, cost=1500, category="Survival"),
+    Item("First Aid Kit", {"Shields": 25}, cost=1500, category="Survival"),
+    Item("Heartbeat Sensor", {"Move Speed": 0.05}, cost=1500, category="Survival"),
+    Item("Siphon Gloves", {"HP": 25}, cost=1500, category="Survival"),
+    Item("Reinforced Titanium", {"Shields": 25}, cost=3750, category="Survival"),
+    Item("Cushioned Padding", {"Shields": 25}, cost=4000, category="Survival"),
+    Item("Ironclad Exhaust Ports", {"Cooldown Reduction": 0.05}, cost=4000, category="Survival"),
+    Item("Vishkar Condensor",{"Shields": 25},cost=4000,category="Survival",extra_effect=vishkar_condensor_effect
+),
+
 
     # Juno-specific items
     Item("Lock-On Shield", {"Ability Power": 0.1001}, 4000, "Survival", character="Juno"),
     Item("Lux Loop", {"Ability Power": 0.1001}, 4000, "Ability", character="Juno"),
     Item("Pulsar Torpedos", {"Ability Lifesteal": 0.10}, 10000, "Ability", character="Juno",
-         extra_effect=lambda stats: {"Bonus Damage": 20 * (1 + stats.get("Ability Power", 0.0))}),
+         extra_effect=lambda stats: 20 * (1 + stats.get("Ability Power", 0.0))),
     Item("Solar Shielding", {"Ability Power": 0.15}, 10000, "Ability", character="Juno"),
     Item("Red Promise Regulator", {"Shields": 50, "Ability Power": 0.15}, 10000, "Ability", character="Juno"),
     Item("Boosted Rockets", {"Shields": 25}, 4000, "Survival", character="Juno"),
     Item("Forti-Glide", {"Shields": 75, "Damage Reduction": 0.10}, 10000, "Survival", character="Juno"),
     Item("Sunburst Serum", {"Shields": 75}, 10000, "Survival", character="Juno"),
-
-    # New Survival items
-    Item("Field Rations", {"HP": 10}, 1000, "Survival"),
-    Item("Running Shoes", {"HP": 10}, 1000, "Survival"),
-    Item("Adrenaline Shot", {"HP": 25}, 1500, "Survival"),
-    Item("Armored Vest", {"Armor": 25}, 1500, "Survival"),
-    Item("Electrolytes", {}, 1500, "Survival"),
-    Item("First Aid Kit", {"Shields": 25}, 1500, "Survival"),
-    Item("Heartbeat Sensor", {"Move Speed": 5}, 1500, "Survival"),
-    Item("Siphon Gloves", {"HP": 25}, 1500, "Survival"),
-    Item("Reinforced Titanium", {"Shields": 25}, 3750, "Survival"),
-    Item("Cushioned Padding", {"Shields": 25}, 4000, "Survival"),
-    Item("Ironclad Exhaust Ports", {"Cooldown Reduction": 0.05}, 4000, "Survival"),
-    Item("Vishkar Condensor", {"Shields": 25}, 4000, "Survival", extra_effect=vishkar_condensor_effect),
 ]
-
 # --- Base stats ---
 BASE_STATS = {
     "Juno": {"HP": 75, "Shields": 150, "Armor": 0},
