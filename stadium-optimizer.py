@@ -1,21 +1,20 @@
 import streamlit as st
 from itertools import combinations
 
-# --- Item class ---
+# --- Item class with extra_effect support ---
 class Item:
     def __init__(self, name, stats, cost, category, character=None, extra_effect=None):
         self.name = name
-        self.stats = stats  # dict of stat_name: value
+        self.stats = stats
         self.cost = cost
         self.category = category
         self.character = character
-        self.extra_effect = extra_effect  # Optional function for special effects
+        self.extra_effect = extra_effect
 
-# --- Special effect function for Pulsar Torpedos ---
-def pulsar_torpedos_effect(stats):
-    # Adds 20 base damage + 50% of ability power (expressed as percentage, e.g. 0.10)
-    ability_power = stats.get("Ability Power", 0)
-    return 20 + 0.5 * ability_power * 100
+# --- Pulsar Torpedos effect function ---
+def pulsar_torpedos_effect(stats, base_value=20):
+    ability_power = stats.get("Ability Power", 0.0)
+    return base_value * (1 + ability_power)
 # --- Item pool ---
 ITEM_POOL = [
     Item("Power Playbook", {"Ability Power": 0.10}, 1000, "Ability"),
