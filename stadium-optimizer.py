@@ -136,6 +136,7 @@ def filter_items_for_target(items, target):
     return filtered
 
 def calculate_build_stats(items, base_stats):
+    # Initialize stats with base values
     stats = {
         "HP": base_stats.get("HP", 0),
         "Shields": base_stats.get("Shields", 0),
@@ -154,36 +155,31 @@ def calculate_build_stats(items, base_stats):
         "Critical Hit Damage": 0.0,
     }
 
-    # Base sum for flat stats and accumulate multipliers
-    hp_multiplier = 0.0
-    armor_multiplier = 0.0
-    shields_multiplier = 0.0
-
+    # 1) Add all flat stats from items
     for item in items:
         for stat, val in item.stats.items():
             if stat == "Cooldown Reduction":
                 stats["Cooldown Reduction"] *= (1 - val)
-            elif stat == "HP Multiplier":
-                hp_multiplier += val
-            elif stat == "Armor Multiplier":
-                armor_multiplier += val
-            elif stat == "Shields Multiplier":
-                shields_multiplier += val
             elif stat in stats:
                 stats[stat] += val
 
-    # Clamp cooldown reduction min 0.1
+    # 2) Apply % multipliers from items that boost stats multiplicatively
+    #    Example: Meka Z-Series increases HP, Armor, Shields by 8%
+    for item in items:
+        if item.name == "Meka Z-Series":
+            stats["HP"] *= 1.08
+            stats["Armor"] *= 1.08
+            stats["Shields"] *= 1.08
+
+        # Add any other multiplier items here if needed
+
+    # Clamp cooldown reduction minimum
     stats["Cooldown Reduction"] = max(stats["Cooldown Reduction"], 0.1)
 
-    # Apply multipliers AFTER flat stats are added
-    stats["HP"] *= (1 + hp_multiplier)
-    stats["Armor"] *= (1 + armor_multiplier)
-    stats["Shields"] *= (1 + shields_multiplier)
-
-    # Apply cooldown reduction to Ability Power
+    # Apply cooldown reduction effect to Ability Power
     stats["Ability Power"] *= stats["Cooldown Reduction"]
 
-    # Handle Lock-On Shield extra HP: 50% of Shields added to HP
+    # 3) Add Lock-On Shield bonus: 50% of current Shields added as extra HP
     if any(item.name == "Lock-On Shield" for item in items):
         stats["HP"] += 0.5 * stats["Shields"]
 
