@@ -104,51 +104,43 @@ def filter_items_for_target(items, target):
     ]
 
 def calculate_build_stats(items, base_stats):
-    stats = base_stats.copy()
-    additive_stats = {
+    # Start with a full copy of base stats
+    stats = {
+        "HP": base_stats.get("HP", 0),
+        "Shields": base_stats.get("Shields", 0),
+        "Armor": base_stats.get("Armor", 0),
+        "Max Ammo": 0,
         "Weapon Power": 0.0,
         "Ability Power": 0.0,
         "Attack Speed": 0.0,
-        "Cooldown Reduction": 1.0,  # multiplicative
         "Reload Speed": 0.0,
+        "Cooldown Reduction": 1.0,  # multiplicative, so we multiply (1 - x)
         "Damage Reduction": 0.0,
         "Weapon Lifesteal": 0.0,
         "Ability Lifesteal": 0.0,
         "Move Speed": 0.0,
-        "Critical Hit Damage": 0.0,
         "Melee Damage": 0.0,
-        "Max Ammo": 0,
+        "Critical Hit Damage": 0.0,
     }
-    for key in ["HP", "Shields", "Armor"]:
-        if key not in stats:
-            stats[key] = 0
 
     for item in items:
         for stat, val in item.stats.items():
-            if stat in {"HP", "Shields", "Armor", "Max Ammo"}:
+            if stat == "Cooldown Reduction":
+                stats["Cooldown Reduction"] *= (1 - val)
+            elif stat in stats:
                 stats[stat] += val
-            elif stat == "Cooldown Reduction":
-                additive_stats["Cooldown Reduction"] *= (1 - val)
             else:
-                additive_stats[stat] = additive_stats.get(stat, 0) + val
+                stats[stat] = val  # fallback just in case
 
-    if additive_stats["Cooldown Reduction"] < 0.1:
-        additive_stats["Cooldown Reduction"] = 0.1
+    # Ensure cooldown doesn't go below a hard floor (e.g. 90% reduction is minimum)
+    if stats["Cooldown Reduction"] < 0.1:
+        stats["Cooldown Reduction"] = 0.1
 
-    stats["Weapon Power"] = additive_stats["Weapon Power"]
-    stats["Ability Power"] = additive_stats["Ability Power"] * additive_stats["Cooldown Reduction"]
-    stats["Attack Speed"] = additive_stats["Attack Speed"]
-    stats["Reload Speed"] = additive_stats["Reload Speed"]
-    stats["Damage Reduction"] = additive_stats["Damage Reduction"]
-    stats["Weapon Lifesteal"] = additive_stats["Weapon Lifesteal"]
-    stats["Ability Lifesteal"] = additive_stats["Ability Lifesteal"]
-    stats["Move Speed"] = additive_stats["Move Speed"]
-    stats["Critical Hit Damage"] = additive_stats["Critical Hit Damage"]
-    stats["Melee Damage"] = additive_stats["Melee Damage"]
-    stats["Max Ammo"] = stats.get("Max Ammo", 0) + additive_stats.get("Max Ammo", 0)
+    # Finalize Ability Power with cooldown applied
+    stats["Ability Power"] *= stats["Cooldown Reduction"]
 
     return stats
-
+    
 def evaluate_build(stats, target):
     if target == "HP":
         return stats.get("HP", 0)
