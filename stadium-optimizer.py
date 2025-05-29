@@ -73,7 +73,6 @@ def evaluate_build(items: List[Item]) -> Dict[str, float]:
     combined_stats.update(derived_stats)
     return combined_stats
 
-# Example item pool with costs
 ITEM_POOL = [
     Item("Item A", {"HP": 50, "Weapon Power": 0.1, "Cooldown Reduction": 0.1}, cost=150),
     Item("Item B", {"Armor": 30, "Damage Reduction": 0.05, "Attack Speed": 0.05}, cost=120),
@@ -99,6 +98,11 @@ def format_stat(name, value):
             return str(int(round(value)))
         else:
             return f"{value:.2f}"
+
+def display_stats(title: str, stats: Dict[str, float]):
+    st.markdown(f"**{title}:**")
+    for name, val in stats.items():
+        st.markdown(f"- **{name}:** {format_stat(name, val)}")
 
 def main():
     st.title("Game Build Optimizer")
@@ -133,18 +137,13 @@ def main():
         st.markdown("**Items:** " + ", ".join(item.name for item in best_build))
         st.markdown("---")
 
-        # Separate derived stats
         derived_keys = {"Effective HP", "Weapon DPS", "Ability DPS"}
 
-        st.markdown("**Stats:**")
         normal_stats = {k: v for k, v in best_stats.items() if k not in derived_keys}
-        stat_data = [(name, format_stat(name, val)) for name, val in normal_stats.items()]
-        st.table(stat_data)
-
-        st.markdown("**Derived Stats:**")
         derived_stats = {k: best_stats[k] for k in derived_keys if k in best_stats}
-        derived_data = [(name, format_stat(name, val)) for name, val in derived_stats.items()]
-        st.table(derived_data)
+
+        display_stats("Stats", normal_stats)
+        display_stats("Derived Stats", derived_stats)
 
 if __name__ == "__main__":
     main()
