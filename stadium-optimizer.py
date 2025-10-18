@@ -1,13 +1,13 @@
-# streamlit_build_optimizer_v2.py
+# streamlit_build_optimizer_plotly.py
 import streamlit as st
 from functools import lru_cache
-from itertools import combinations
 from typing import List, Dict, Tuple, Optional
 import math
 import time
+import heapq
 import pandas as pd
-import matplotlib.pyplot as plt
 import numpy as np
+import plotly.graph_objects as go
 
 # -------------------------
 # Item class
@@ -37,7 +37,7 @@ def vishkar_condensor_effect(stats):
         return {"HP": -hp, "Shields": hp}
 
 # -------------------------
-# Item pool (same as prior)
+# Item pool (kept same)
 # -------------------------
 ITEM_POOL = [
     Item("Power Playbook", {"Ability Power": 0.10}, 1000, "Ability"),
@@ -144,11 +144,10 @@ target_relevant_stats = {
 }
 
 # -------------------------
-# Stat calculation (cached)
+# Stat calculation (cacheable)
 # -------------------------
 @st.cache_data(show_spinner=False)
 def calculate_build_stats_keyed(item_names: Tuple[str, ...], base_stats: Dict[str, float]) -> Dict[str, float]:
-    # Helper to compute stats from a tuple of item names (used in caching)
     items = [next(it for it in ITEM_POOL if it.name == nm) for nm in item_names]
     return calculate_build_stats(items, base_stats)
 
@@ -195,7 +194,7 @@ def calculate_build_stats(items: List[Item], base_stats: Dict[str, float]) -> Di
             elif key == "Shields Multiplier":
                 stats["Shields"] *= (1.0 + mul)
 
-    # special named multipliers
+    # item-by-name multipliers
     for item in items:
         if item.name == "Meka Z-Series":
             stats["HP"] *= 1.08
@@ -274,24 +273,25 @@ def filter_items_for_target(items: List[Item], target: str) -> List[Item]:
     return filtered
 
 # -------------------------
-# Search function (top_k)
+# Search (top-K via backtracking + pruning)
 # -------------------------
 def find_best_builds(items: List[Item], base_stats: Dict[str, float], budget: int,
-                     target: str, max_items: int, top_k: int = 1, progress_callback=None) -> List[Tuple[float, Tuple[Item, ...]]]:
+                     target: str, max_items: int, top_k_limit: int = 5, progress_callback=None) -> List[Tuple[float, Tuple[Item, ...]]]:
     items_sorted = sorted(items, key=lambda it: it.cost)
     n = len(items_sorted)
-    # single item contributions for optimistic bound
+
+    # single item optimistic contributions
     single_contribs = [evaluate_build(calculate_build_stats([it], base_stats), target, [it]) for it in items_sorted]
     sorted_single_desc = sorted(single_contribs, reverse=True)
 
-    best_results: List[Tuple[float, Tuple[Item, ...]]] = []
-    best_score = -float('inf')
+    # min-heap for top_k (store negative score for max behavior) or store as (score, build)
+    top_heap: List[Tuple[float, Tuple[Item, ...]]] = []  # will be min-heap by score
+
     checked = 0
     start_time = time.time()
 
-    from functools import lru_cache
     @lru_cache(maxsize=200000)
-    def eval_key(item_names: Tuple[str, ...]) -> float:
+    def eval_for_key(item_names: Tuple[str, ...]) -> float:
         stats = calculate_build_stats_keyed(item_names, base_stats)
         return evaluate_build(stats, target, [])
 
@@ -301,23 +301,25 @@ def find_best_builds(items: List[Item], base_stats: Dict[str, float], budget: in
         return current_score + sum(sorted_single_desc[:remaining_slots])
 
     def record_candidate(build_items: Tuple[Item, ...], score: float):
-        nonlocal best_results, best_score
-        best_results.append((score, build_items))
-        best_results.sort(key=lambda x: x[0], reverse=True)
-        del best_results[top_k:]
-        best_score = best_results[0][0] if best_results else -float('inf')
+        # maintain min-heap of size up to top_k_limit
+        if len(top_heap) < top_k_limit:
+            heapq.heappush(top_heap, (score, build_items))
+        else:
+            # if score better than smallest in heap, replace
+            if score > top_heap[0][0]:
+                heapq.heapreplace(top_heap, (score, build_items))
 
     def backtrack(start_idx: int, chosen: List[Item], cost_so_far: int):
-        nonlocal checked, best_score
+        nonlocal checked
         checked += 1
         if progress_callback and checked % 300 == 0:
-            elapsed = time.time() - start_time
-            progress_callback(checked, elapsed)
+            progress_callback(checked, time.time() - start_time)
 
         if chosen:
             key = tuple(it.name for it in chosen)
-            score = eval_key(key)
-            if len(best_results) < top_k or score > best_results[-1][0]:
+            score = eval_for_key(key)
+            # If we haven't filled top heap or this score might be good, record
+            if len(top_heap) < top_k_limit or score > top_heap[0][0]:
                 record_candidate(tuple(chosen), score)
 
         if len(chosen) >= max_items:
@@ -326,9 +328,10 @@ def find_best_builds(items: List[Item], base_stats: Dict[str, float], budget: in
         remaining_slots = max_items - len(chosen)
         current_score = 0.0
         if chosen:
-            current_score = eval_key(tuple(it.name for it in chosen))
+            current_score = eval_for_key(tuple(it.name for it in chosen))
         bound = optimistic_bound(current_score, remaining_slots)
-        if len(best_results) >= top_k and bound <= best_results[-1][0]:
+        # If our current optimistic bound can't beat the worst in top_heap, prune
+        if top_heap and len(top_heap) >= top_k_limit and bound <= top_heap[0][0]:
             return
 
         for i in range(start_idx, n):
@@ -341,13 +344,15 @@ def find_best_builds(items: List[Item], base_stats: Dict[str, float], budget: in
             chosen.pop()
 
     backtrack(0, [], 0)
-    return best_results
+    # Convert heap to sorted list desc
+    results = sorted(top_heap, key=lambda x: x[0], reverse=True)
+    return results
 
 # -------------------------
-# UI helpers: item color mapping
+# UI helpers: cost color & html formatting
 # -------------------------
 def cost_color_html(item: Item) -> str:
-    # user requested: 1000-1500 green; 3750-6000 aqua; >6000 light purple
+    # 1000-1500 green; 3750-6000 aqua; >6000 light purple
     c = item.cost
     if 1000 <= c <= 1500:
         color = "#33cc33"  # green
@@ -356,8 +361,8 @@ def cost_color_html(item: Item) -> str:
     elif c > 6000:
         color = "#d6b3ff"  # light purple
     else:
-        color = "#ffffff"  # default white/black text background
-    return f'<span style="color:{color}; font-weight:600">{item.name} (Cost: {item.cost})</span>'
+        color = "#000000"  # default black
+    return f'<span style="color:{color}; font-weight:700">{item.name} (Cost: {item.cost})</span>'
 
 def item_html_list(items: List[Item]) -> str:
     parts = []
@@ -390,72 +395,71 @@ def display_relevant_stats(stats: Dict[str, float], target: str) -> List[str]:
     return lines
 
 # -------------------------
-# Radar chart helper (matplotlib)
+# Plotly radar chart helper
 # -------------------------
-def plot_radar(build_stats_list: List[Dict[str, float]], labels: List[str], stats_to_plot: List[str], title: str = "Build comparison"):
-    """
-    build_stats_list: list of stats dicts for each build (length = K)
-    labels: list of labels for each build
-    stats_to_plot: list of stat keys (order matters)
-    """
-    num_vars = len(stats_to_plot)
-    angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False).tolist()
-    # complete circle
-    angles += angles[:1]
+def plotly_radar(build_stats_list: List[Dict[str, float]], labels: List[str], stats_to_plot: List[str], title: str = "Build comparison"):
+    # Build a DataFrame of values
+    df = pd.DataFrame([{k: b.get(k, 0.0) for k in stats_to_plot} for b in build_stats_list], index=labels)
 
-    fig, ax = plt.subplots(figsize=(6, 6), subplot_kw=dict(polar=True))
+    # Normalize per-stat across builds for fair radar comparison
+    mins = df.min(axis=0)
+    maxs = df.max(axis=0)
+    ranges = maxs - mins
+    ranges[ranges == 0] = 1.0
+    df_norm = (df - mins) / ranges
 
-    # Normalize each stat across builds to [0,1] so chart is comparative
-    # prepare matrix: rows=builds, cols=stats
-    values_matrix = []
-    for stats in build_stats_list:
-        row = [float(stats.get(k, 0.0)) for k in stats_to_plot]
-        values_matrix.append(row)
-    arr = np.array(values_matrix, dtype=float)
-    # avoid dividing by zero: use range (max-min) or 1 if all equal
-    mins = arr.min(axis=0)
-    maxs = arr.max(axis=0)
-    ranges = np.where((maxs - mins) == 0, 1.0, maxs - mins)
-    normalized = (arr - mins) / ranges
-    for i, row in enumerate(normalized):
-        vals = row.tolist()
-        vals += vals[:1]
-        ax.plot(angles, vals, label=labels[i])
-        ax.fill(angles, vals, alpha=0.15)
-    ax.set_thetagrids(np.degrees(angles[:-1]), stats_to_plot)
-    ax.set_title(title)
-    ax.legend(loc='upper right', bbox_to_anchor=(1.2, 1.1))
-    ax.set_ylim(0, 1)
-    st.pyplot(fig)
+    fig = go.Figure()
+    for label in df_norm.index:
+        values = df_norm.loc[label].tolist()
+        # close the loop
+        values += values[:1]
+        categories = stats_to_plot + [stats_to_plot[0]]
+        fig.add_trace(go.Scatterpolar(
+            r=values,
+            theta=categories,
+            fill='toself',
+            name=label,
+            hoverinfo='text',
+            text=[f"{cat}: {df.loc[label, cat]:.3f}" for cat in stats_to_plot] + [""],
+        ))
+
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(visible=True, range=[0, 1])
+        ),
+        showlegend=True,
+        title=title,
+        margin=dict(l=40, r=40, t=60, b=30)
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 # -------------------------
 # Streamlit UI
 # -------------------------
-st.set_page_config(page_title="Build Optimizer v2", layout="wide")
-st.title("Game Build Optimizer — Radar + Side-by-side comparison")
+st.set_page_config(page_title="Build Optimizer (Plotly)", layout="wide")
+st.title("Game Build Optimizer — Plotly Radar + Side-by-side")
 
-col1, col2 = st.columns([1, 2])
+left, right = st.columns([1, 2])
 
-with col1:
+with left:
     character = st.selectbox("Character", list(BASE_STATS.keys()))
     money = st.number_input("Money budget", min_value=0, max_value=500000, value=10000, step=500)
     target = st.selectbox("Optimization target", list(target_relevant_stats.keys()), index=7)
     max_items = st.slider("Max items in a build", 1, 8, 6)
-    # User requested: customize up to how many builds are generated
-    max_builds_to_generate = st.slider("Generate up to how many builds (Top-K search limit)", 1, 20, 6)
-    top_k_show = st.slider("How many top builds to show", 1, max_builds_to_generate, 3)
+    max_builds_to_generate = st.slider("Generate up to how many builds (search limit)", 1, 30, 10)
+    top_k_show = st.slider("How many top builds to show", 1, max_builds_to_generate, 5)
     st.markdown("**Filters**")
     categories = sorted({it.category for it in ITEM_POOL})
     chosen_categories = st.multiselect("Categories", options=categories, default=categories)
-    name_filter = st.text_input("Name filter")
+    name_filter = st.text_input("Name filter (substring)")
     include_char_only = st.checkbox("Only items for selected character", value=False)
     st.markdown("---")
-    st.write("Color legend:")
-    st.markdown("- <span style='color:#33cc33;font-weight:600'>Green</span> — cost 1,000–1,500", unsafe_allow_html=True)
-    st.markdown("- <span style='color:#00cccc;font-weight:600'>Aqua</span> — cost 3,750–6,000", unsafe_allow_html=True)
-    st.markdown("- <span style='color:#d6b3ff;font-weight:600'>Light purple</span> — cost > 6,000", unsafe_allow_html=True)
+    st.markdown("**Color legend** (items shown in build expanders):")
+    st.markdown("- <span style='color:#33cc33;font-weight:700'>Green</span> — cost 1,000–1,500", unsafe_allow_html=True)
+    st.markdown("- <span style='color:#00cccc;font-weight:700'>Aqua</span> — cost 3,750–6,000", unsafe_allow_html=True)
+    st.markdown("- <span style='color:#d6b3ff;font-weight:700'>Light purple</span> — cost > 6,000", unsafe_allow_html=True)
 
-with col2:
+with right:
     st.markdown("### Candidate items")
     def item_visible(it: Item) -> bool:
         if chosen_categories and it.category not in chosen_categories:
@@ -467,76 +471,77 @@ with col2:
         return True
     filtered_items = [it for it in ITEM_POOL if item_visible(it) and (it.character is None or not include_char_only or it.character == character)]
     filtered_items = filter_items_for_target(filtered_items, target)
-    st.write(f"{len(filtered_items)} filtered items")
+    st.write(f"{len(filtered_items)} filtered items (relevant to target)")
+
     for it in filtered_items:
         st.markdown(cost_color_html(it) + f" — {it.category} — Stats: {it.stats}", unsafe_allow_html=True)
 
 if st.button("Generate builds"):
-    with st.spinner("Searching..."):
+    with st.spinner("Searching best builds..."):
         progress_placeholder = st.empty()
         progress_bar = st.progress(0)
-        def progress_cb(checked, extra):
+
+        def progress_cb(checked, elapsed):
             pct = min(0.95, math.tanh(checked / 2000.0) * 0.99)
             progress_bar.progress(int(pct * 100))
-            progress_placeholder.text(f"Checked ~{checked} partial builds — elapsed {extra:.1f}s")
+            progress_placeholder.text(f"Checked ~{checked} partial builds — elapsed {elapsed:.1f}s")
 
-        # get results (limit search to up to max_builds_to_generate during pruning)
+        # Run search - generate up to `max_builds_to_generate` candidate builds
         results = find_best_builds(filtered_items, BASE_STATS[character], money, target,
-                                   max_items, top_k=max_builds_to_generate, progress_callback=progress_cb)
+                                   max_items, top_k_limit=max_builds_to_generate, progress_callback=progress_cb)
         progress_bar.progress(100)
-        progress_placeholder.text("Search complete")
+        progress_placeholder.text("Search complete.")
 
         if not results:
-            st.warning("No builds found.")
+            st.warning("No builds found under those constraints.")
         else:
-            # Trim to the number user wants to display
+            # results is list of (score, build) sorted desc already
             results = results[:top_k_show]
-            st.success(f"Showing top {len(results)} builds (generated up to {max_builds_to_generate})")
+            st.success(f"Showing top {len(results)} builds (searched up to {max_builds_to_generate}).")
 
-            # Prepare a list for radar chart and side-by-side DataFrame
-            build_labels = []
+            # Prepare data for table + radar
+            labels = []
             build_stats_list = []
-            build_scores = []
-            df_rows = []
-            for rank, (score, build) in enumerate(results, start=1):
-                item_list = list(build)
-                stats = calculate_build_stats(item_list, BASE_STATS[character])
-                total_cost = sum(it.cost for it in item_list)
-                build_labels.append(f"Rank {rank} (Cost:{total_cost})")
+            rows = []
+            for idx, (score, build) in enumerate(results, start=1):
+                build_items = list(build)
+                stats = calculate_build_stats(build_items, BASE_STATS[character])
+                total_cost = sum(it.cost for it in build_items)
+                label = f"Build #{idx} (Cost:{total_cost})"
+                labels.append(label)
                 build_stats_list.append(stats)
-                build_scores.append(score)
-                # Flatten relevant stats for DataFrame: include HP, Shields, Armor + top relevant stats for target
-                row = {
-                    "Rank": rank,
-                    "Score": round(score, 3),
+                rows.append({
+                    "Build": label,
+                    "Score": round(score, 4),
                     "Total Cost": total_cost,
-                    "Items": ", ".join(it.name for it in item_list)
-                }
-                # include a few stats so side-by-side is meaningful
-                for k in ["HP", "Shields", "Armor", "Ability Power", "Weapon Power", "Attack Speed", "Cooldown Reduction", "Damage Reduction"]:
-                    row[k] = round(stats.get(k, 0.0), 4)
-                df_rows.append(row)
+                    "Items": ", ".join(it.name for it in build_items),
+                    "HP": round(stats.get("HP", 0.0), 4),
+                    "Shields": round(stats.get("Shields", 0.0), 4),
+                    "Armor": round(stats.get("Armor", 0.0), 4),
+                    "Ability Power": round(stats.get("Ability Power", 0.0), 6),
+                    "Weapon Power": round(stats.get("Weapon Power", 0.0), 6),
+                    "Attack Speed": round(stats.get("Attack Speed", 0.0), 6),
+                    "Cooldown Reduction": round(1.0 - stats.get("Cooldown Reduction", 1.0), 6),
+                    "Damage Reduction": round(stats.get("Damage Reduction", 0.0), 6),
+                })
 
-            df = pd.DataFrame(df_rows).set_index("Rank")
-
-            # Show side-by-side table (interactive)
+            df = pd.DataFrame(rows).set_index("Build")
             st.markdown("### Side-by-side summary")
             st.dataframe(df)
 
-            # Show expanders for each build with items color-coded
-            for rank, (score, build) in enumerate(results, start=1):
+            # Build expanders with color-coded item lists
+            for i, (score, build) in enumerate(results, start=1):
                 total_cost = sum(it.cost for it in build)
-                with st.expander(f"Rank {rank} — Score: {score:.3f} — Cost: {total_cost}"):
+                with st.expander(f"Build #{i} — Score: {score:.4f} — Cost: {total_cost}"):
                     st.markdown(item_html_list(list(build)), unsafe_allow_html=True)
-                    stats = calculate_build_stats(list(build), BASE_STATS[character])
                     st.write("Stats breakdown:")
+                    stats = calculate_build_stats(list(build), BASE_STATS[character])
                     for line in display_relevant_stats(stats, target):
                         st.write(line)
 
-            # Radar chart: choose some stats to compare
-            # We'll include a small set that tends to be present across many builds
+            # Radar chart — default stat set (you can customize if you want)
             stats_to_plot = ["HP", "Shields", "Armor", "Ability Power", "Weapon Power", "Attack Speed", "Damage Reduction"]
-            st.markdown("### Radar chart comparison")
-            plot_radar(build_stats_list, build_labels, stats_to_plot, title=f"Top {len(results)} builds comparison")
+            st.markdown("### Radar chart comparison (normalized per-stat)")
+            plotly_radar(build_stats_list, labels, stats_to_plot, title=f"Top {len(results)} builds comparison")
 
         st.balloons()
