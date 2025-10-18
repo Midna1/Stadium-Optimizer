@@ -1,32 +1,18 @@
-# streamlit_build_optimizer_nographs.py
 import streamlit as st
-from functools import lru_cache
-from typing import List, Dict, Tuple, Optional
-import math
-import time
-import heapq
-import pandas as pd
+from itertools import combinations
+from typing import List, Dict
 
-# -------------------------
-# Item class
-# -------------------------
+# --- Item class ---
 class Item:
-    def __init__(self, name: str, stats: Dict[str, float], cost: int,
-                 category: str, character: Optional[str] = None,
-                 extra_effect=None):
+    def __init__(self, name, stats, cost, category, character=None, extra_effect=None):
         self.name = name
-        self.stats = stats or {}
+        self.stats = stats  # dict of stat_name: value
         self.cost = cost
-        self.category = category
-        self.character = character
-        self.extra_effect = extra_effect
+        self.category = category  # "Weapon", "Ability", "Survival"
+        self.character = character  # None or character string
+        self.extra_effect = extra_effect  # function(stats) -> dict or number
 
-    def __repr__(self):
-        return f"Item({self.name}, cost={self.cost})"
-
-# -------------------------
-# Example extra effect
-# -------------------------
+# --- Extra effects ---
 def vishkar_condensor_effect(stats):
     hp = stats.get("HP", 0)
     if hp > 100:
@@ -34,10 +20,12 @@ def vishkar_condensor_effect(stats):
     else:
         return {"HP": -hp, "Shields": hp}
 
-# -------------------------
-# Item pool
-# (kept identical to your list)
-# -------------------------
+BASE_MISSILE_DAMAGE = 35
+def pulsar_torpedos_effect(stats):
+    bonus_ap = stats.get("Bonus Ability Power", 0.0)
+    return BASE_MISSILE_DAMAGE * (1 + bonus_ap)
+
+# --- Item pool ---
 ITEM_POOL = [
     Item("Power Playbook", {"Ability Power": 0.10}, 1000, "Ability"),
     Item("Charged Plating", {"Armor": 25, "Ability Power": 0.10}, 1000, "Ability"),
@@ -72,7 +60,7 @@ ITEM_POOL = [
     Item("Reinforced Titanium", {"Shields": 25}, cost=3750, category="Survival"),
     Item("Cushioned Padding", {"Shields": 25}, cost=4000, category="Survival"),
     Item("Ironclad Exhaust Ports", {"Cooldown Reduction": 0.05}, cost=4000, category="Survival"),
-    Item("Vishkar Condensor", {"Shields": 25}, cost=4000, category="Survival", extra_effect=vishkar_condensor_effect),
+    Item("Vishkar Condensor",{"Shields": 25},cost=4000,category="Survival",extra_effect=vishkar_condensor_effect),
     Item("Vital-E-Tee", {"Armor": 10}, cost=4000, category="Survival"),
     Item("Crusader Hydraulics", {"Armor": 25, "Damage Reduction": 0.10}, cost=10000, category="Survival"),
     Item("Iron Eyes", {"Shields": 25}, cost=4500, category="Survival"),
@@ -102,7 +90,7 @@ ITEM_POOL = [
     Item("Lock-On Shield", {"Ability Power": 0.1001}, 4000, "Survival", character="Juno"),
     Item("Lux Loop", {"Ability Power": 0.1001}, 4000, "Ability", character="Juno"),
     Item("Pulsar Torpedos", {"Ability Lifesteal": 0.10}, 10000, "Ability", character="Juno",
-         extra_effect=lambda stats: 20 * (1 + stats.get("Ability Power", 0.0))),
+         extra_effect=pulsar_torpedos_effect),
     Item("Solar Shielding", {"Ability Power": 0.15}, 10000, "Ability", character="Juno"),
     Item("Red Promise Regulator", {"Shields": 50, "Ability Power": 0.15}, 10000, "Ability", character="Juno"),
     Item("Boosted Rockets", {"Shields": 25}, 4000, "Survival", character="Juno"),
@@ -110,9 +98,7 @@ ITEM_POOL = [
     Item("Sunburst Serum", {"Shields": 75}, 10000, "Survival", character="Juno"),
 ]
 
-# -------------------------
-# Base stats & targets
-# -------------------------
+# --- Base stats ---
 BASE_STATS = {
     "Juno": {"HP": 75, "Shields": 150, "Armor": 0},
     "Kiriko": {"HP": 225, "Shields": 0, "Armor": 0},
@@ -120,6 +106,7 @@ BASE_STATS = {
     "Mei": {"HP": 300, "Shields": 0, "Armor": 0},
 }
 
+# --- Relevant stats by optimization target ---
 target_relevant_stats = {
     "HP": {"HP"},
     "Shields": {"Shields"},
@@ -142,126 +129,8 @@ target_relevant_stats = {
     "Weapon DPS": {"Weapon Power", "Attack Speed", "Reload Speed", "Critical Hit Damage"},
 }
 
-# -------------------------
-# Stat calculation (cacheable)
-# -------------------------
-@st.cache_data(show_spinner=False)
-def calculate_build_stats_keyed(item_names: Tuple[str, ...], base_stats: Dict[str, float]) -> Dict[str, float]:
-    items = [next(it for it in ITEM_POOL if it.name == nm) for nm in item_names]
-    return calculate_build_stats(items, base_stats)
-
-def calculate_build_stats(items: List[Item], base_stats: Dict[str, float]) -> Dict[str, float]:
-    stats = {
-        "HP": base_stats.get("HP", 0),
-        "Shields": base_stats.get("Shields", 0),
-        "Armor": base_stats.get("Armor", 0),
-        "Max Ammo": 0,
-        "Weapon Power": 0.0,
-        "Ability Power": 0.0,
-        "Attack Speed": 0.0,
-        "Reload Speed": 0.0,
-        "Cooldown Reduction": 1.0,
-        "Damage Reduction": 0.0,
-        "Weapon Lifesteal": 0.0,
-        "Ability Lifesteal": 0.0,
-        "Move Speed": 0.0,
-        "Melee Damage": 0.0,
-        "Critical Hit Damage": 0.0,
-        "HP Multiplier": 0.0,
-        "Armor Multiplier": 0.0,
-        "Shields Multiplier": 0.0,
-        "Bonus Damage": 0.0,
-    }
-
-    for item in items:
-        for stat, val in item.stats.items():
-            if stat == "Cooldown Reduction":
-                stats["Cooldown Reduction"] *= max(0.0, (1.0 - val))
-            elif stat in stats:
-                stats[stat] += val
-            else:
-                stats[stat] = stats.get(stat, 0.0) + val
-
-    # generic multipliers
-    for key in ["HP Multiplier", "Armor Multiplier", "Shields Multiplier"]:
-        mul = stats.get(key, 0.0)
-        if mul:
-            if key == "HP Multiplier":
-                stats["HP"] *= (1.0 + mul)
-            elif key == "Armor Multiplier":
-                stats["Armor"] *= (1.0 + mul)
-            elif key == "Shields Multiplier":
-                stats["Shields"] *= (1.0 + mul)
-
-    # item-by-name multipliers
-    for item in items:
-        if item.name == "Meka Z-Series":
-            stats["HP"] *= 1.08
-            stats["Armor"] *= 1.08
-            stats["Shields"] *= 1.08
-
-    # apply extra_effects
-    for item in items:
-        if item.extra_effect:
-            try:
-                out = item.extra_effect(stats.copy())
-            except Exception:
-                out = None
-            if out is None:
-                continue
-            if isinstance(out, dict):
-                for k, v in out.items():
-                    stats[k] = stats.get(k, 0.0) + v
-            else:
-                stats["Bonus Damage"] = stats.get("Bonus Damage", 0.0) + float(out)
-
-    stats["Cooldown Reduction"] = max(stats.get("Cooldown Reduction", 1.0), 0.1)
-    stats["Ability Power"] = stats.get("Ability Power", 0.0) * stats["Cooldown Reduction"]
-
-    if any(i.name == "Lock-On Shield" for i in items):
-        stats["HP"] += 0.5 * stats.get("Shields", 0.0)
-
-    return stats
-
-# -------------------------
-# Evaluation
-# -------------------------
-def evaluate_build(stats: Dict[str, float], target: str, items: List[Item]) -> float:
-    base_damage = 100.0
-    ap = stats.get("Ability Power", 0.0)
-    bonus = stats.get("Bonus Damage", 0.0)
-    if target == "Ability Damage":
-        return base_damage * (1.0 + ap) + bonus
-    elif target == "Ability DPS":
-        base_cooldown = 6.0
-        effective_cd = base_cooldown * stats.get("Cooldown Reduction", 1.0)
-        total_damage = base_damage * (1.0 + ap) + bonus
-        return total_damage / effective_cd if effective_cd > 0 else 0.0
-    elif target == "HP":
-        return stats.get("HP", 0.0)
-    elif target == "Shields":
-        return stats.get("Shields", 0.0)
-    elif target == "Armor":
-        return stats.get("Armor", 0.0)
-    elif target == "Total HP":
-        return stats.get("HP", 0.0) + stats.get("Shields", 0.0) + stats.get("Armor", 0.0)
-    elif target == "Weapon Power":
-        return stats.get("Weapon Power", 0.0)
-    elif target == "Cooldown Reduction":
-        return 1.0 - stats.get("Cooldown Reduction", 1.0)
-    elif target == "Weapon DPS":
-        return 100.0 * (1.0 + stats.get("Weapon Power", 0.0)) * (1.0 + stats.get("Attack Speed", 0.0)) * (1.0 + stats.get("Reload Speed", 0.0)) * (1.0 + stats.get("Critical Hit Damage", 0.0))
-    elif target == "Effective HP":
-        total = stats.get("HP", 0.0) + stats.get("Shields", 0.0) + stats.get("Armor", 0.0)
-        dr = min(stats.get("Damage Reduction", 0.0), 0.99)
-        return total / (1.0 - dr) if (1.0 - dr) > 0 else float('inf')
-    else:
-        return stats.get(target, 0.0)
-
-# -------------------------
-# Filtering helper
-# -------------------------
-def filter_items_for_target(items: List[Item], target: str) -> List[Item]:
+# --- Filter items for target ---
+def filter_items_for_target(items, target):
     relevant_stats = target_relevant_stats.get(target, set())
     filtered = []
     for item in items:
@@ -271,109 +140,107 @@ def filter_items_for_target(items: List[Item], target: str) -> List[Item]:
             filtered.append(item)
     return filtered
 
-# -------------------------
-# Search (top-K via backtracking + pruning)
-# -------------------------
-def find_best_builds(items: List[Item], base_stats: Dict[str, float], budget: int,
-                     target: str, max_items: int, top_k_limit: int = 5, progress_callback=None) -> List[Tuple[float, Tuple[Item, ...]]]:
-    items_sorted = sorted(items, key=lambda it: it.cost)
-    n = len(items_sorted)
+# --- Calculate build stats ---
+def calculate_build_stats(items: List[Item], base_stats: Dict[str, float]) -> Dict[str, float]:
+    stats = {
+        "HP": base_stats.get("HP", 0),
+        "Shields": base_stats.get("Shields", 0),
+        "Armor": base_stats.get("Armor", 0),
+        "Weapon Power": 0.0,
+        "Ability Power": 0.0,
+        "Bonus Ability Power": 0.0,
+        "Attack Speed": 0.0,
+        "Reload Speed": 0.0,
+        "Cooldown Reduction": 1.0,
+        "Damage Reduction": 0.0,
+        "Weapon Lifesteal": 0.0,
+        "Ability Lifesteal": 0.0,
+        "Move Speed": 0.0,
+        "Melee Damage": 0.0,
+        "Critical Hit Damage": 0.0,
+        "Bonus Damage": 0.0,
+        "HP Multiplier": 0.0,
+        "Armor Multiplier": 0.0,
+        "Shields Multiplier": 0.0,
+    }
 
-    # optimistic single-item contributions
-    single_contribs = [evaluate_build(calculate_build_stats([it], base_stats), target, [it]) for it in items_sorted]
-    sorted_single_desc = sorted(single_contribs, reverse=True)
+    for item in items:
+        for stat, val in item.stats.items():
+            if stat == "Cooldown Reduction":
+                stats["Cooldown Reduction"] *= max(0.0, 1.0 - val)
+            elif stat == "Ability Power":
+                stats["Ability Power"] += val
+                stats["Bonus Ability Power"] += val
+            elif stat in stats:
+                stats[stat] += val
+            else:
+                stats[stat] = stats.get(stat, 0.0) + val
 
-    # min-heap for top_k_limit (stores tuples (score, build_tuple))
-    top_heap: List[Tuple[float, Tuple[Item, ...]]] = []
+    for item in items:
+        if item.name == "Meka Z-Series":
+            stats["HP"] *= 1.08
+            stats["Armor"] *= 1.08
+            stats["Shields"] *= 1.08
 
-    checked = 0
-    start_time = time.time()
+    for item in items:
+        if item.extra_effect:
+            result = item.extra_effect(stats.copy())
+            if isinstance(result, dict):
+                for k, v in result.items():
+                    stats[k] = stats.get(k, 0.0) + v
+            else:
+                stats["Bonus Damage"] += float(result)
 
-    @lru_cache(maxsize=200000)
-    def eval_for_key(item_names: Tuple[str, ...]) -> float:
-        stats = calculate_build_stats_keyed(item_names, base_stats)
-        return evaluate_build(stats, target, [])
+    stats["Cooldown Reduction"] = max(stats.get("Cooldown Reduction", 1.0), 0.1)
+    stats["Ability Power"] *= stats["Cooldown Reduction"]
 
-    def optimistic_bound(current_score: float, remaining_slots: int):
-        if remaining_slots <= 0:
-            return current_score
-        return current_score + sum(sorted_single_desc[:remaining_slots])
+    if any(i.name == "Lock-On Shield" for i in items):
+        stats["HP"] += 0.5 * stats.get("Shields", 0.0)
 
-    def record_candidate(build_items: Tuple[Item, ...], score: float):
-        if len(top_heap) < top_k_limit:
-            heapq.heappush(top_heap, (score, build_items))
-        else:
-            if score > top_heap[0][0]:
-                heapq.heapreplace(top_heap, (score, build_items))
+    return stats
 
-    def backtrack(start_idx: int, chosen: List[Item], cost_so_far: int):
-        nonlocal checked
-        checked += 1
-        if progress_callback and checked % 300 == 0:
-            progress_callback(checked, time.time() - start_time)
+# --- Evaluate build ---
+def evaluate_build(stats, target, items):
+    base_damage = 100
+    ap = stats.get("Ability Power", 0.0)
+    bonus = stats.get("Bonus Damage", 0.0)
 
-        if chosen:
-            key = tuple(it.name for it in chosen)
-            score = eval_for_key(key)
-            if len(top_heap) < top_k_limit or score > top_heap[0][0]:
-                record_candidate(tuple(chosen), score)
-
-        if len(chosen) >= max_items:
-            return
-
-        remaining_slots = max_items - len(chosen)
-        current_score = 0.0
-        if chosen:
-            current_score = eval_for_key(tuple(it.name for it in chosen))
-        bound = optimistic_bound(current_score, remaining_slots)
-        if top_heap and len(top_heap) >= top_k_limit and bound <= top_heap[0][0]:
-            return
-
-        for i in range(start_idx, n):
-            it = items_sorted[i]
-            new_cost = cost_so_far + it.cost
-            if new_cost > budget:
-                continue
-            chosen.append(it)
-            backtrack(i + 1, chosen, new_cost)
-            chosen.pop()
-
-    backtrack(0, [], 0)
-    results = sorted(top_heap, key=lambda x: x[0], reverse=True)
-    return results
-
-# -------------------------
-# UI helpers: cost color & html formatting
-# -------------------------
-def cost_color_html(item: Item) -> str:
-    # 1000-1500 green; 3750-6000 aqua; >6000 light purple
-    c = item.cost
-    if 1000 <= c <= 1500:
-        color = "#33cc33"  # green
-    elif 3750 <= c <= 6000:
-        color = "#00cccc"  # aqua
-    elif c > 6000:
-        color = "#d6b3ff"  # light purple
+    if target == "Ability Damage":
+        return base_damage * (1 + ap) + bonus
+    elif target == "Ability DPS":
+        base_cooldown = 6
+        effective_cd = base_cooldown * stats.get("Cooldown Reduction", 1.0)
+        total_damage = base_damage * (1 + ap) + bonus
+        return total_damage / effective_cd if effective_cd > 0 else 0
+    elif target == "HP":
+        return stats.get("HP", 0)
+    elif target == "Shields":
+        return stats.get("Shields", 0)
+    elif target == "Armor":
+        return stats.get("Armor", 0)
+    elif target == "Total HP":
+        return stats.get("HP", 0) + stats.get("Shields", 0) + stats.get("Armor", 0)
+    elif target == "Weapon Power":
+        return stats.get("Weapon Power", 0)
+    elif target == "Cooldown Reduction":
+        return 1 - stats.get("Cooldown Reduction", 1.0)
+    elif target == "Weapon DPS":
+        return 100 * (1 + stats["Weapon Power"]) * (1 + stats["Attack Speed"]) * (1 + stats["Reload Speed"]) * (1 + stats["Critical Hit Damage"])
+    elif target == "Effective HP":
+        total = stats["HP"] + stats["Shields"] + stats["Armor"]
+        dr = min(stats["Damage Reduction"], 0.99)
+        return total / (1 - dr)
     else:
-        color = "#000000"  # default black
-    return f'<span style="color:{color}; font-weight:700">{item.name} (Cost: {item.cost})</span>'
+        return stats.get(target, 0)
 
-def item_html_list(items: List[Item]) -> str:
-    parts = []
-    for it in items:
-        parts.append(cost_color_html(it) + f' — {it.category} — Stats: {it.stats}')
-    return "<br>".join(parts)
-
-# -------------------------
-# Display relevant stats
-# -------------------------
-def display_relevant_stats(stats: Dict[str, float], target: str) -> List[str]:
+# --- Display relevant stats ---
+def display_relevant_stats(stats, target):
     relevant_stats = target_relevant_stats.get(target, set())
     lines = []
     for s in ["HP", "Shields", "Armor"]:
         if s in relevant_stats or target in ["Total HP", "Effective HP"]:
-            lines.append(f"{s}: {stats.get(s, 0):.1f}")
-    for stat in sorted(relevant_stats):
+            lines.append(f"{s}: {stats.get(s, 0)}")
+    for stat in relevant_stats:
         if stat in ["HP", "Shields", "Armor"]:
             continue
         val = stats.get(stat)
@@ -382,114 +249,50 @@ def display_relevant_stats(stats: Dict[str, float], target: str) -> List[str]:
         if isinstance(val, float) and abs(val) < 10:
             lines.append(f"{stat}: {val*100:.1f}%")
         else:
-            if isinstance(val, float):
-                lines.append(f"{stat}: {val:.2f}")
-            else:
-                lines.append(f"{stat}: {val}")
+            lines.append(f"{stat}: {val}")
     return lines
 
-# -------------------------
-# Streamlit UI
-# -------------------------
-st.set_page_config(page_title="Build Optimizer (No Graphs)", layout="wide")
-st.title("Game Build Optimizer — Top-K (No Graphs)")
+# --- Streamlit UI ---
+st.title("Game Build Optimizer")
 
-col_left, col_right = st.columns([1, 2])
+character = st.selectbox("Choose your character", list(BASE_STATS.keys()))
+money = st.number_input("Enter your money budget", min_value=0, max_value=100000, value=10000, step=500)
+target = st.selectbox("Choose optimization target", list(target_relevant_stats.keys()))
+max_items = st.slider("Maximum number of items to buy", 1, 6, 6)
+top_k = st.slider("Number of top builds to display", 1, 10, 3)
 
-with col_left:
-    character = st.selectbox("Choose your character", list(BASE_STATS.keys()))
-    money = st.number_input("Enter your money budget", min_value=0, max_value=500000, value=10000, step=500)
-    target = st.selectbox("Choose optimization target", list(target_relevant_stats.keys()), index=7)
-    max_items = st.slider("Maximum number of items to buy", 1, 8, 6)
-    max_builds_to_generate = st.slider("Generate up to how many builds (search limit)", 1, 30, 10)
-    top_k_show = st.slider("How many top builds to show", 1, max_builds_to_generate, 5)
-    st.markdown("---")
-    st.markdown("**Filters**")
-    categories = sorted({it.category for it in ITEM_POOL})
-    chosen_categories = st.multiselect("Categories to include", options=categories, default=categories)
-    name_filter = st.text_input("Item name filter (substring, optional)")
-    include_character_only = st.checkbox("Only show items for selected character (hide others)", value=False)
-    st.markdown("---")
-    st.markdown("Color legend:")
-    st.markdown("- <span style='color:#33cc33;font-weight:700'>Green</span> — cost 1,000–1,500", unsafe_allow_html=True)
-    st.markdown("- <span style='color:#00cccc;font-weight:700'>Aqua</span> — cost 3,750–6,000", unsafe_allow_html=True)
-    st.markdown("- <span style='color:#d6b3ff;font-weight:700'>Light purple</span> — cost > 6,000", unsafe_allow_html=True)
+# Filter items by character and target
+filtered_items = [item for item in ITEM_POOL if (item.character is None or item.character == character)]
+filtered_items = filter_items_for_target(filtered_items, target)
 
-with col_right:
-    st.markdown("### Candidate items (filtered)")
-    def item_visible(it: Item) -> bool:
-        if chosen_categories and it.category not in chosen_categories:
-            return False
-        if name_filter and name_filter.lower() not in it.name.lower():
-            return False
-        if include_character_only and it.character and it.character != character:
-            return False
-        return True
+st.write(f"Filtering {len(filtered_items)} items for {target} optimization.")
 
-    filtered_items = [it for it in ITEM_POOL if item_visible(it) and (it.character is None or not include_character_only or it.character == character)]
-    filtered_items = filter_items_for_target(filtered_items, target)
-    st.write(f"{len(filtered_items)} items will be considered for the search.")
-    for it in filtered_items:
-        st.markdown(cost_color_html(it) + f" — {it.category} — Stats: {it.stats}", unsafe_allow_html=True)
+# --- Calculate top-K builds ---
+top_builds = []
 
-run_search = st.button("Find best builds")
+with st.spinner("Calculating best builds... This may take a while."):
+    for r in range(1, max_items + 1):
+        for combo in combinations(filtered_items, r):
+            total_cost = sum(item.cost for item in combo)
+            if total_cost <= money:
+                stats = calculate_build_stats(combo, BASE_STATS[character])
+                score = evaluate_build(stats, target, combo)
+                top_builds.append((score, combo, stats))
+    top_builds.sort(reverse=True, key=lambda x: x[0])
+    top_builds = top_builds[:top_k]
 
-if run_search:
-    with st.spinner("Calculating best builds..."):
-        status_placeholder = st.empty()
-        progress_bar = st.progress(0)
-
-        def progress_cb(checked, elapsed):
-            pct = min(0.95, math.tanh(checked / 2000.0) * 0.99)
-            progress_bar.progress(int(pct * 100))
-            status_placeholder.text(f"Checked ~{checked} partial builds — elapsed {elapsed:.1f}s")
-
-        results = find_best_builds(filtered_items, BASE_STATS[character], money, target,
-                                   max_items, top_k_limit=max_builds_to_generate, progress_callback=progress_cb)
-        progress_bar.progress(100)
-        status_placeholder.text("Search complete.")
-
-        if not results:
-            st.warning("No valid build found within budget / filters.")
+# --- Display top-K builds ---
+for idx, (score, combo, stats) in enumerate(top_builds, 1):
+    st.header(f"Build #{idx} - Score: {score:.2f} - Total Cost: {sum(item.cost for item in combo)}")
+    for item in combo:
+        # Color by cost
+        if item.cost <= 1500:
+            color = "green"
+        elif 3750 <= item.cost <= 6000:
+            color = "aqua"
         else:
-            # Trim to how many the user wants to see
-            results = results[:top_k_show]
-            st.success(f"Found {len(results)} build(s). Showing top {len(results)}.")
-
-            # Prepare DataFrame for side-by-side
-            rows = []
-            for rank, (score, build) in enumerate(results, start=1):
-                items_list = list(build)
-                stats = calculate_build_stats(items_list, BASE_STATS[character])
-                total_cost = sum(it.cost for it in items_list)
-                rows.append({
-                    "Rank": rank,
-                    "Score": round(score, 6),
-                    "Total Cost": total_cost,
-                    "Items": ", ".join(it.name for it in items_list),
-                    "HP": round(stats.get("HP", 0.0), 4),
-                    "Shields": round(stats.get("Shields", 0.0), 4),
-                    "Armor": round(stats.get("Armor", 0.0), 4),
-                    "Ability Power": round(stats.get("Ability Power", 0.0), 6),
-                    "Weapon Power": round(stats.get("Weapon Power", 0.0), 6),
-                    "Attack Speed": round(stats.get("Attack Speed", 0.0), 6),
-                    "Cooldown Reduction (saved%)": round((1.0 - stats.get("Cooldown Reduction", 1.0)) * 100.0, 4),
-                    "Damage Reduction": round(stats.get("Damage Reduction", 0.0), 6),
-                })
-
-            df = pd.DataFrame(rows).set_index("Rank")
-            st.markdown("### Side-by-side summary")
-            st.dataframe(df)
-
-            # Expanders with color-coded item lists and stat breakdown
-            for rank, (score, build) in enumerate(results, start=1):
-                items_list = list(build)
-                total_cost = sum(it.cost for it in items_list)
-                with st.expander(f"Rank {rank} — Score: {score:.6f} — Cost: {total_cost}"):
-                    st.markdown(item_html_list(items_list), unsafe_allow_html=True)
-                    st.write("Stats breakdown:")
-                    stats = calculate_build_stats(items_list, BASE_STATS[character])
-                    for line in display_relevant_stats(stats, target):
-                        st.write(line)
-
-        st.balloons()
+            color = "plum"
+        st.markdown(f"- <span style='color:{color}'>{item.name} (Cost: {item.cost})</span>", unsafe_allow_html=True)
+    st.write("Stats breakdown:")
+    for line in display_relevant_stats(stats, target):
+        st.write(line)
