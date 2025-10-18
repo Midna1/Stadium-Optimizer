@@ -1,13 +1,16 @@
-# streamlit_build_optimizer.py
+# streamlit_build_optimizer_v2.py
 import streamlit as st
 from functools import lru_cache
 from itertools import combinations
 from typing import List, Dict, Tuple, Optional
 import math
 import time
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
 
 # -------------------------
-# Item class and utilities
+# Item class
 # -------------------------
 class Item:
     def __init__(self, name: str, stats: Dict[str, float], cost: int,
@@ -16,14 +19,16 @@ class Item:
         self.name = name
         self.stats = stats or {}
         self.cost = cost
-        self.category = category  # "Weapon", "Ability", "Survival", etc.
+        self.category = category
         self.character = character
-        self.extra_effect = extra_effect  # function(stats) -> dict or value
+        self.extra_effect = extra_effect
 
     def __repr__(self):
         return f"Item({self.name}, cost={self.cost})"
 
-# ---- Extra effect example (already in original) ----
+# -------------------------
+# Example extra effect
+# -------------------------
 def vishkar_condensor_effect(stats):
     hp = stats.get("HP", 0)
     if hp > 100:
@@ -32,7 +37,7 @@ def vishkar_condensor_effect(stats):
         return {"HP": -hp, "Shields": hp}
 
 # -------------------------
-# Item pool (kept from user, minor fix for lambda)
+# Item pool (same as prior)
 # -------------------------
 ITEM_POOL = [
     Item("Power Playbook", {"Ability Power": 0.10}, 1000, "Ability"),
@@ -97,7 +102,6 @@ ITEM_POOL = [
     # Juno-specific items
     Item("Lock-On Shield", {"Ability Power": 0.1001}, 4000, "Survival", character="Juno"),
     Item("Lux Loop", {"Ability Power": 0.1001}, 4000, "Ability", character="Juno"),
-    # NOTE: original lambda returned numeric; here we accept numeric or dict in code.
     Item("Pulsar Torpedos", {"Ability Lifesteal": 0.10}, 10000, "Ability", character="Juno",
          extra_effect=lambda stats: 20 * (1 + stats.get("Ability Power", 0.0))),
     Item("Solar Shielding", {"Ability Power": 0.15}, 10000, "Ability", character="Juno"),
@@ -108,7 +112,7 @@ ITEM_POOL = [
 ]
 
 # -------------------------
-# Base stats and targets
+# Base stats & targets
 # -------------------------
 BASE_STATS = {
     "Juno": {"HP": 75, "Shields": 150, "Armor": 0},
@@ -117,7 +121,6 @@ BASE_STATS = {
     "Mei": {"HP": 300, "Shields": 0, "Armor": 0},
 }
 
-# What stats matter for each optimization target
 target_relevant_stats = {
     "HP": {"HP"},
     "Shields": {"Shields"},
@@ -141,11 +144,15 @@ target_relevant_stats = {
 }
 
 # -------------------------
-# Core stat calculation
+# Stat calculation (cached)
 # -------------------------
+@st.cache_data(show_spinner=False)
+def calculate_build_stats_keyed(item_names: Tuple[str, ...], base_stats: Dict[str, float]) -> Dict[str, float]:
+    # Helper to compute stats from a tuple of item names (used in caching)
+    items = [next(it for it in ITEM_POOL if it.name == nm) for nm in item_names]
+    return calculate_build_stats(items, base_stats)
+
 def calculate_build_stats(items: List[Item], base_stats: Dict[str, float]) -> Dict[str, float]:
-    """Return a stats dictionary after applying items. Fully applies extra_effects and multipliers."""
-    # Start from base
     stats = {
         "HP": base_stats.get("HP", 0),
         "Shields": base_stats.get("Shields", 0),
@@ -155,7 +162,6 @@ def calculate_build_stats(items: List[Item], base_stats: Dict[str, float]) -> Di
         "Ability Power": 0.0,
         "Attack Speed": 0.0,
         "Reload Speed": 0.0,
-        # NOTE: store cooldown multiplicatively (1.0 = no reduction; multiply by (1 - val) for each)
         "Cooldown Reduction": 1.0,
         "Damage Reduction": 0.0,
         "Weapon Lifesteal": 0.0,
@@ -163,28 +169,22 @@ def calculate_build_stats(items: List[Item], base_stats: Dict[str, float]) -> Di
         "Move Speed": 0.0,
         "Melee Damage": 0.0,
         "Critical Hit Damage": 0.0,
-        # Multipliers that items may add
         "HP Multiplier": 0.0,
         "Armor Multiplier": 0.0,
         "Shields Multiplier": 0.0,
-        # extra arbitrary fields
         "Bonus Damage": 0.0,
     }
 
-    # 1) Add flat stats and multiplicative cooldown modifiers
     for item in items:
         for stat, val in item.stats.items():
             if stat == "Cooldown Reduction":
-                # item provides "Cooldown Reduction": 0.05 meaning -5% cooldown
                 stats["Cooldown Reduction"] *= max(0.0, (1.0 - val))
             elif stat in stats:
                 stats[stat] += val
             else:
-                # unknown stat: add it anyway
                 stats[stat] = stats.get(stat, 0.0) + val
 
-    # 2) Apply explicit multiplier items (by name) and generic multiplier keys
-    # Apply generic multipliers from item.stats (HP Multiplier keys etc.)
+    # generic multipliers
     for key in ["HP Multiplier", "Armor Multiplier", "Shields Multiplier"]:
         mul = stats.get(key, 0.0)
         if mul:
@@ -195,15 +195,14 @@ def calculate_build_stats(items: List[Item], base_stats: Dict[str, float]) -> Di
             elif key == "Shields Multiplier":
                 stats["Shields"] *= (1.0 + mul)
 
-    # Also support item-by-name special multipliers
+    # special named multipliers
     for item in items:
         if item.name == "Meka Z-Series":
             stats["HP"] *= 1.08
             stats["Armor"] *= 1.08
             stats["Shields"] *= 1.08
 
-    # 3) Apply extra_effect from items. The extra_effect may return a dict or a single numeric value
-    # If a number is returned, interpret as BonusDamage (backward-compatible with original lambda).
+    # apply extra_effects
     for item in items:
         if item.extra_effect:
             try:
@@ -216,30 +215,23 @@ def calculate_build_stats(items: List[Item], base_stats: Dict[str, float]) -> Di
                 for k, v in out.items():
                     stats[k] = stats.get(k, 0.0) + v
             else:
-                # numeric -> store as Bonus Damage
                 stats["Bonus Damage"] = stats.get("Bonus Damage", 0.0) + float(out)
 
-    # 4) Final adjustments and clamps
-    # Clamp cooldown reduction so that it's not absurdly small (set a lower cap at 0.1 -> 90% reduction cap)
     stats["Cooldown Reduction"] = max(stats.get("Cooldown Reduction", 1.0), 0.1)
-    # Apply cooldown reduction effect to ability power (original logic: AP * cooldown)
     stats["Ability Power"] = stats.get("Ability Power", 0.0) * stats["Cooldown Reduction"]
 
-    # 5) Lock-On Shield effect (50% of shields converted to extra HP)
     if any(i.name == "Lock-On Shield" for i in items):
         stats["HP"] += 0.5 * stats.get("Shields", 0.0)
 
     return stats
 
 # -------------------------
-# Evaluation functions
+# Evaluation
 # -------------------------
 def evaluate_build(stats: Dict[str, float], target: str, items: List[Item]) -> float:
-    """Return a numeric score for a build according to target."""
     base_damage = 100.0
     ap = stats.get("Ability Power", 0.0)
     bonus = stats.get("Bonus Damage", 0.0)
-
     if target == "Ability Damage":
         return base_damage * (1.0 + ap) + bonus
     elif target == "Ability DPS":
@@ -269,7 +261,7 @@ def evaluate_build(stats: Dict[str, float], target: str, items: List[Item]) -> f
         return stats.get(target, 0.0)
 
 # -------------------------
-# Filtering helpers
+# Filtering helper
 # -------------------------
 def filter_items_for_target(items: List[Item], target: str) -> List[Item]:
     relevant_stats = target_relevant_stats.get(target, set())
@@ -282,88 +274,60 @@ def filter_items_for_target(items: List[Item], target: str) -> List[Item]:
     return filtered
 
 # -------------------------
-# Search (backtracking with pruning + caching)
+# Search function (top_k)
 # -------------------------
 def find_best_builds(items: List[Item], base_stats: Dict[str, float], budget: int,
                      target: str, max_items: int, top_k: int = 1, progress_callback=None) -> List[Tuple[float, Tuple[Item, ...]]]:
-    """
-    Find top-k builds using backtracking with simple pruning and caching.
-    Returns list of (score, build_tuple) sorted descending by score.
-    progress_callback(optional): func(checked_count, total_estimate) for UI progress.
-    """
-    # Pre-sort items by cost ascending to help pruning
     items_sorted = sorted(items, key=lambda it: it.cost)
     n = len(items_sorted)
-
-    # Precompute single-item contributions for a cheap optimistic upper bound
-    single_contribs = []
-    for it in items_sorted:
-        stats = calculate_build_stats([it], base_stats)
-        single_contribs.append(evaluate_build(stats, target, [it]))
-
-    # For optimistic bound of remaining items, we will use the best possible single-item contributions
-    sorted_single_contribs_desc = sorted(single_contribs, reverse=True)
+    # single item contributions for optimistic bound
+    single_contribs = [evaluate_build(calculate_build_stats([it], base_stats), target, [it]) for it in items_sorted]
+    sorted_single_desc = sorted(single_contribs, reverse=True)
 
     best_results: List[Tuple[float, Tuple[Item, ...]]] = []
     best_score = -float('inf')
     checked = 0
     start_time = time.time()
-    cache: Dict[Tuple[Tuple[str, ...], str], float] = {}
 
-    def record_candidate(build_items: Tuple[Item, ...], score: float):
-        nonlocal best_score, best_results
-        # insert maintaining top_k sorted descending
-        best_results.append((score, build_items))
-        best_results.sort(key=lambda x: x[0], reverse=True)
-        # keep only top_k
-        del best_results[top_k:]
-        best_score = best_results[0][0] if best_results else -float('inf')
+    from functools import lru_cache
+    @lru_cache(maxsize=200000)
+    def eval_key(item_names: Tuple[str, ...]) -> float:
+        stats = calculate_build_stats_keyed(item_names, base_stats)
+        return evaluate_build(stats, target, [])
 
-    # simple optimistic bound function: current score + sum of best single-item contributions for remaining slots
     def optimistic_bound(current_score: float, remaining_slots: int):
         if remaining_slots <= 0:
             return current_score
-        return current_score + sum(sorted_single_contribs_desc[:remaining_slots])
+        return current_score + sum(sorted_single_desc[:remaining_slots])
 
-    # memoized eval for a given set of items by names and char (string key)
-    @lru_cache(maxsize=100000)
-    def eval_for_key(item_names_key: Tuple[str, ...], character_key: str) -> float:
-        key_items = tuple(next(it for it in items_sorted if it.name == nm) for nm in item_names_key)
-        stats = calculate_build_stats(list(key_items), base_stats)
-        return evaluate_build(stats, target, list(key_items))
+    def record_candidate(build_items: Tuple[Item, ...], score: float):
+        nonlocal best_results, best_score
+        best_results.append((score, build_items))
+        best_results.sort(key=lambda x: x[0], reverse=True)
+        del best_results[top_k:]
+        best_score = best_results[0][0] if best_results else -float('inf')
 
-    # backtracking
     def backtrack(start_idx: int, chosen: List[Item], cost_so_far: int):
         nonlocal checked, best_score
-        # progress callback
         checked += 1
-        if progress_callback and checked % 500 == 0:
+        if progress_callback and checked % 300 == 0:
             elapsed = time.time() - start_time
             progress_callback(checked, elapsed)
 
-        # Evaluate current build
         if chosen:
             key = tuple(it.name for it in chosen)
-            # use cached eval
-            score = eval_for_key(tuple(key), "")
-            # Update best
-            if score > best_score or len(best_results) < top_k:
+            score = eval_key(key)
+            if len(best_results) < top_k or score > best_results[-1][0]:
                 record_candidate(tuple(chosen), score)
 
-        # If reached max items, stop deeper recursion
         if len(chosen) >= max_items:
             return
 
-        # For each candidate item index >= start_idx
         remaining_slots = max_items - len(chosen)
-        # Compute optimistic upper bound for pruning:
-        # current best possible = current evaluated score (or 0) + sum of best remaining single-item contributions
         current_score = 0.0
         if chosen:
-            current_score = eval_for_key(tuple(it.name for it in chosen), "")
-
+            current_score = eval_key(tuple(it.name for it in chosen))
         bound = optimistic_bound(current_score, remaining_slots)
-        # If bound not better than current best, prune
         if len(best_results) >= top_k and bound <= best_results[-1][0]:
             return
 
@@ -371,18 +335,38 @@ def find_best_builds(items: List[Item], base_stats: Dict[str, float], budget: in
             it = items_sorted[i]
             new_cost = cost_so_far + it.cost
             if new_cost > budget:
-                # since sorted by cost ascending, any further items will also be too expensive at this index (but combination might allow different cheaper items)
                 continue
             chosen.append(it)
             backtrack(i + 1, chosen, new_cost)
             chosen.pop()
 
-    # Start backtracking
     backtrack(0, [], 0)
     return best_results
 
 # -------------------------
-# Display helpers
+# UI helpers: item color mapping
+# -------------------------
+def cost_color_html(item: Item) -> str:
+    # user requested: 1000-1500 green; 3750-6000 aqua; >6000 light purple
+    c = item.cost
+    if 1000 <= c <= 1500:
+        color = "#33cc33"  # green
+    elif 3750 <= c <= 6000:
+        color = "#00cccc"  # aqua
+    elif c > 6000:
+        color = "#d6b3ff"  # light purple
+    else:
+        color = "#ffffff"  # default white/black text background
+    return f'<span style="color:{color}; font-weight:600">{item.name} (Cost: {item.cost})</span>'
+
+def item_html_list(items: List[Item]) -> str:
+    parts = []
+    for it in items:
+        parts.append(cost_color_html(it) + f' — {it.category} — Stats: {it.stats}')
+    return "<br>".join(parts)
+
+# -------------------------
+# Display relevant stats
 # -------------------------
 def display_relevant_stats(stats: Dict[str, float], target: str) -> List[str]:
     relevant_stats = target_relevant_stats.get(target, set())
@@ -396,11 +380,9 @@ def display_relevant_stats(stats: Dict[str, float], target: str) -> List[str]:
         val = stats.get(stat)
         if val is None:
             continue
-        # present small fractions as percentages
         if isinstance(val, float) and abs(val) < 10:
-            lines.append(f"{stat}: {val * 100:.1f}%")
+            lines.append(f"{stat}: {val*100:.1f}%")
         else:
-            # float large numbers formatting
             if isinstance(val, float):
                 lines.append(f"{stat}: {val:.2f}")
             else:
@@ -408,148 +390,153 @@ def display_relevant_stats(stats: Dict[str, float], target: str) -> List[str]:
     return lines
 
 # -------------------------
+# Radar chart helper (matplotlib)
+# -------------------------
+def plot_radar(build_stats_list: List[Dict[str, float]], labels: List[str], stats_to_plot: List[str], title: str = "Build comparison"):
+    """
+    build_stats_list: list of stats dicts for each build (length = K)
+    labels: list of labels for each build
+    stats_to_plot: list of stat keys (order matters)
+    """
+    num_vars = len(stats_to_plot)
+    angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False).tolist()
+    # complete circle
+    angles += angles[:1]
+
+    fig, ax = plt.subplots(figsize=(6, 6), subplot_kw=dict(polar=True))
+
+    # Normalize each stat across builds to [0,1] so chart is comparative
+    # prepare matrix: rows=builds, cols=stats
+    values_matrix = []
+    for stats in build_stats_list:
+        row = [float(stats.get(k, 0.0)) for k in stats_to_plot]
+        values_matrix.append(row)
+    arr = np.array(values_matrix, dtype=float)
+    # avoid dividing by zero: use range (max-min) or 1 if all equal
+    mins = arr.min(axis=0)
+    maxs = arr.max(axis=0)
+    ranges = np.where((maxs - mins) == 0, 1.0, maxs - mins)
+    normalized = (arr - mins) / ranges
+    for i, row in enumerate(normalized):
+        vals = row.tolist()
+        vals += vals[:1]
+        ax.plot(angles, vals, label=labels[i])
+        ax.fill(angles, vals, alpha=0.15)
+    ax.set_thetagrids(np.degrees(angles[:-1]), stats_to_plot)
+    ax.set_title(title)
+    ax.legend(loc='upper right', bbox_to_anchor=(1.2, 1.1))
+    ax.set_ylim(0, 1)
+    st.pyplot(fig)
+
+# -------------------------
 # Streamlit UI
 # -------------------------
-st.set_page_config(page_title="Game Build Optimizer", layout="wide")
-st.title("Game Build Optimizer — improved")
+st.set_page_config(page_title="Build Optimizer v2", layout="wide")
+st.title("Game Build Optimizer — Radar + Side-by-side comparison")
 
-col_left, col_right = st.columns([1, 2])
+col1, col2 = st.columns([1, 2])
 
-with col_left:
-    character = st.selectbox("Choose your character", list(BASE_STATS.keys()))
-    money = st.number_input("Enter your money budget", min_value=0, max_value=500000, value=10000, step=500)
-
-    target = st.selectbox("Choose optimization target", list(target_relevant_stats.keys()), index=7)  # default to Ability DPS
-
-    # Filters: categories and name search
+with col1:
+    character = st.selectbox("Character", list(BASE_STATS.keys()))
+    money = st.number_input("Money budget", min_value=0, max_value=500000, value=10000, step=500)
+    target = st.selectbox("Optimization target", list(target_relevant_stats.keys()), index=7)
+    max_items = st.slider("Max items in a build", 1, 8, 6)
+    # User requested: customize up to how many builds are generated
+    max_builds_to_generate = st.slider("Generate up to how many builds (Top-K search limit)", 1, 20, 6)
+    top_k_show = st.slider("How many top builds to show", 1, max_builds_to_generate, 3)
+    st.markdown("**Filters**")
     categories = sorted({it.category for it in ITEM_POOL})
-    chosen_categories = st.multiselect("Categories to include", options=categories, default=categories)
-
-    name_filter = st.text_input("Item name filter (substring, optional)")
-
-    # max items, top-k, cost cap per item
-    max_items = st.slider("Maximum number of items to buy", 1, 8, 6)
-    top_k = st.number_input("Show top K builds", min_value=1, max_value=20, value=3, step=1)
-    max_cost_per_item = st.number_input("Maximum cost per item (0 = no limit)", min_value=0, value=0)
-
-    # optional: narrow to character-specific items or global
-    include_character_only = st.checkbox("Only show items for selected character (hide others)", value=False)
-
+    chosen_categories = st.multiselect("Categories", options=categories, default=categories)
+    name_filter = st.text_input("Name filter")
+    include_char_only = st.checkbox("Only items for selected character", value=False)
     st.markdown("---")
-    st.write("Extra options")
-    show_progress = st.checkbox("Show search progress", value=True)
-    limit_search_items = st.slider("Limit number of candidate items (for speed)", 5, min(20, len(ITEM_POOL)), value=min(40, len(ITEM_POOL)))
+    st.write("Color legend:")
+    st.markdown("- <span style='color:#33cc33;font-weight:600'>Green</span> — cost 1,000–1,500", unsafe_allow_html=True)
+    st.markdown("- <span style='color:#00cccc;font-weight:600'>Aqua</span> — cost 3,750–6,000", unsafe_allow_html=True)
+    st.markdown("- <span style='color:#d6b3ff;font-weight:600'>Light purple</span> — cost > 6,000", unsafe_allow_html=True)
 
-    # Weights: allow user to add a weight modifier for multi-importance evaluation (applies to the final score)
-    st.markdown("### Optional stat weighting (advanced)")
-    weight_target = st.number_input(f"Weight multiplier for primary target ({target})", min_value=0.0, value=1.0, step=0.1)
-
-with col_right:
-    st.markdown("### Candidate Items")
-    # Filter items by character and category and name
-    filtered_items = [
-        it for it in ITEM_POOL
-        if (it.character is None or not include_character_only or it.character == character or not include_character_only)
-    ]
-    # second pass: respect chosen_categories and name_filter and character applicability
+with col2:
+    st.markdown("### Candidate items")
     def item_visible(it: Item) -> bool:
         if chosen_categories and it.category not in chosen_categories:
             return False
         if name_filter and name_filter.lower() not in it.name.lower():
             return False
-        # hide items for other characters unless include_character_only is False
-        if include_character_only and it.character and it.character != character:
-            return False
-        if max_cost_per_item > 0 and it.cost > max_cost_per_item:
+        if include_char_only and it.character and it.character != character:
             return False
         return True
-
-    filtered_items = [it for it in ITEM_POOL if item_visible(it) and (it.character is None or it.character == character or not include_character_only)]
-
-    # Further filter by "relevant to target" to reduce search space
+    filtered_items = [it for it in ITEM_POOL if item_visible(it) and (it.character is None or not include_char_only or it.character == character)]
     filtered_items = filter_items_for_target(filtered_items, target)
-
-    # Option: limit list for performance (take most promising items by simple per-cost heuristic)
-    if len(filtered_items) > limit_search_items:
-        # score items by simple per-cost contribution to the target (single-item eval / cost)
-        contributions = []
-        for it in filtered_items:
-            s = calculate_build_stats([it], BASE_STATS[character])
-            contrib = evaluate_build(s, target, [it])
-            efficiency = contrib / (it.cost + 1)
-            contributions.append((efficiency, it))
-        contributions.sort(key=lambda x: x[0], reverse=True)
-        filtered_items = [it for _, it in contributions[:limit_search_items]]
-
-    st.write(f"{len(filtered_items)} items will be considered for the search (budget: {money})")
-    # show a compact table
+    st.write(f"{len(filtered_items)} filtered items")
     for it in filtered_items:
-        st.write(f"- {it.name} — {it.category} — Cost: {it.cost} — Stats: {it.stats}")
+        st.markdown(cost_color_html(it) + f" — {it.category} — Stats: {it.stats}", unsafe_allow_html=True)
 
-# -------------------------
-# Run search (button)
-# -------------------------
-run_search = st.button("Find best builds")
-
-if run_search:
-    with st.spinner("Searching for best builds..."):
-        status_placeholder = st.empty()
+if st.button("Generate builds"):
+    with st.spinner("Searching..."):
+        progress_placeholder = st.empty()
         progress_bar = st.progress(0)
-
         def progress_cb(checked, extra):
-            # update a simple progress bar based on elapsed time heuristic (not a total progress)
-            # we do not promise accuracy; just provide feel of progress.
-            # map checked to a squashed progress percentage
-            pct = min(0.98, math.tanh(checked / 2000.0) * 0.99)
-            try:
-                progress_bar.progress(int(pct * 100))
-                status_placeholder.text(f"Checked ~{checked} partial builds, elapsed {extra:.1f}s")
-            except Exception:
-                pass
+            pct = min(0.95, math.tanh(checked / 2000.0) * 0.99)
+            progress_bar.progress(int(pct * 100))
+            progress_placeholder.text(f"Checked ~{checked} partial builds — elapsed {extra:.1f}s")
 
-        # Kick off search
-        search_start = time.time()
-        results = find_best_builds(filtered_items, BASE_STATS[character], money,
-                                   target, max_items, top_k=top_k,
-                                   progress_callback=(progress_cb if show_progress else None))
-        search_time = time.time() - search_start
+        # get results (limit search to up to max_builds_to_generate during pruning)
+        results = find_best_builds(filtered_items, BASE_STATS[character], money, target,
+                                   max_items, top_k=max_builds_to_generate, progress_callback=progress_cb)
         progress_bar.progress(100)
-        status_placeholder.text(f"Search done — examined builds in {search_time:.2f}s.")
+        progress_placeholder.text("Search complete")
 
         if not results:
-            st.warning("No valid build found within budget / filters.")
+            st.warning("No builds found.")
         else:
-            # Show results
-            st.success(f"Found {len(results)} build(s).")
+            # Trim to the number user wants to display
+            results = results[:top_k_show]
+            st.success(f"Showing top {len(results)} builds (generated up to {max_builds_to_generate})")
+
+            # Prepare a list for radar chart and side-by-side DataFrame
+            build_labels = []
+            build_stats_list = []
+            build_scores = []
+            df_rows = []
             for rank, (score, build) in enumerate(results, start=1):
-                # Recompute stats to display
-                stats = calculate_build_stats(list(build), BASE_STATS[character])
-                adjusted_score = score * weight_target  # apply optional weighting
-                with st.expander(f"Rank #{rank} — Score: {adjusted_score:.3f} — Cost: {sum(it.cost for it in build)}"):
-                    st.write("Items:")
-                    for it in build:
-                        st.write(f"- {it.name} (Cost: {it.cost}) — {it.stats} {'[char: '+it.character+']' if it.character else ''}")
+                item_list = list(build)
+                stats = calculate_build_stats(item_list, BASE_STATS[character])
+                total_cost = sum(it.cost for it in item_list)
+                build_labels.append(f"Rank {rank} (Cost:{total_cost})")
+                build_stats_list.append(stats)
+                build_scores.append(score)
+                # Flatten relevant stats for DataFrame: include HP, Shields, Armor + top relevant stats for target
+                row = {
+                    "Rank": rank,
+                    "Score": round(score, 3),
+                    "Total Cost": total_cost,
+                    "Items": ", ".join(it.name for it in item_list)
+                }
+                # include a few stats so side-by-side is meaningful
+                for k in ["HP", "Shields", "Armor", "Ability Power", "Weapon Power", "Attack Speed", "Cooldown Reduction", "Damage Reduction"]:
+                    row[k] = round(stats.get(k, 0.0), 4)
+                df_rows.append(row)
+
+            df = pd.DataFrame(df_rows).set_index("Rank")
+
+            # Show side-by-side table (interactive)
+            st.markdown("### Side-by-side summary")
+            st.dataframe(df)
+
+            # Show expanders for each build with items color-coded
+            for rank, (score, build) in enumerate(results, start=1):
+                total_cost = sum(it.cost for it in build)
+                with st.expander(f"Rank {rank} — Score: {score:.3f} — Cost: {total_cost}"):
+                    st.markdown(item_html_list(list(build)), unsafe_allow_html=True)
+                    stats = calculate_build_stats(list(build), BASE_STATS[character])
                     st.write("Stats breakdown:")
                     for line in display_relevant_stats(stats, target):
                         st.write(line)
-                    # Show raw important stats
-                    st.write(f"Raw score (unweighted): {score:.3f}")
-                    st.write(f"Weighted score: {adjusted_score:.3f}")
-                    # small table style display of whole stats dict
-                    st.table({k: (f"{v:.3f}" if isinstance(v, float) else v) for k, v in sorted(stats.items())})
+
+            # Radar chart: choose some stats to compare
+            # We'll include a small set that tends to be present across many builds
+            stats_to_plot = ["HP", "Shields", "Armor", "Ability Power", "Weapon Power", "Attack Speed", "Damage Reduction"]
+            st.markdown("### Radar chart comparison")
+            plot_radar(build_stats_list, build_labels, stats_to_plot, title=f"Top {len(results)} builds comparison")
 
         st.balloons()
-
-# -------------------------
-# Notes and tips
-# -------------------------
-st.markdown("---")
-st.markdown(
-    """
-**Notes & Implementation details**
-- Search uses a backtracking approach with a simple optimistic bound + memoized evaluations, which usually prunes many combinations.
-- `extra_effect` functions are now supported; they may return either a `dict` of stat changes or a single numeric (treated as *Bonus Damage* for backward compatibility).
-- You can speed up search by decreasing `max_items`, limiting candidate items, or tuning filters.
-- If you need *exact exhaustive* search for large candidate sets, consider a cloud worker or more advanced pruning heuristics (ILP/knapsack-style).
-"""
-)
